@@ -6,14 +6,9 @@ import torch.nn as nn
 from utils.peter import rouge_score, bleu_score, DataLoader, Batchify, now_time, root_mean_square_error, mean_absolute_error, \
     ids2tokens, unique_sentence_percent, feature_detect, feature_matching_ratio, feature_coverage_ratio, feature_diversity
 
-from utils.andreu import move_content_to_device, peter_print_long, peter_loss_good # les q he afegit jo
-
-# Té sentit importar coses de train? Per fer-lo lo del name main?
+from utils.andreu import move_content_to_device, peter_print_long, peter_loss_good
 
 
-# Tot i que la usa també el train, no estic segur si és adequat que estigui en el utils. De moment sí pq
-# així és menys probable que tingui problemes de imports. Després quan ja em funcioni puc provar si funciona
-# immportar de fitxers que no són simplemnt només utils
 # variables de args per la cara: use_feature (mig solucionat però no provat yet)
 def test(dataloader, model, loss_fn, device, use_feature):
     # Turn on evaluation mode which disables dropout.
@@ -52,8 +47,6 @@ def predict(log_context_dis, topk):
         context = torch.topk(word_prob, topk, 1)[1]  # (batch_size, topk)
     return context  # (batch_size, topk)
 
-
-# YIKES ara peta i encara no l'he entès. Necessitaré comparar amb el PETER original aquí
 
 # Encara no he fet pràcticament res en aquesta funció. Yikes i sembla que peta. No és la més important copilot inútil
 # variables de args per la cara: use_feature, words

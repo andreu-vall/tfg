@@ -1,5 +1,7 @@
 import math
-from utils.peter import now_time
+
+from .peter import now_time
+
 
 # Moure a GPU i transposar seq i feature. Segons Copilot és més estàndard moure les coses a GPU
 # si cal en el train enlloc del dataloader, perquè així compta en el temps del train

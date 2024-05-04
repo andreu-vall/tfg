@@ -5,11 +5,10 @@ import datetime
 import torch
 import argparse
 import torch.nn as nn
-from module import PETER
+
+from models.peter import PETER
 from utils.peter import DataLoader, Batchify, now_time
-
-
-from utils.andreu import move_content_to_device, peter_print_long, peter_content, peter_loss_good # les q he afegit jo
+from utils.andreu import move_content_to_device, peter_print_long, peter_content, peter_loss_good
 from test import test
 
 
