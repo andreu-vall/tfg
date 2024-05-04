@@ -61,5 +61,3 @@ def peter_content(context_loss, text_loss, rating_loss):
     exp_text_loss = math.exp(text_loss)
     return f"context ppl {exp_context_loss:4.4f} | text ppl {exp_text_loss:4.4f} | rating loss {rating_loss:4.4f}"
 
-
-de

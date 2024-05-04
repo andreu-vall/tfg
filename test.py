@@ -3,6 +3,7 @@ import os
 import torch
 import torch.nn as nn
 import logging
+import json
 
 from utils.peter import rouge_score, bleu_score, DataLoader, Batchify, root_mean_square_error, mean_absolute_error, ids2tokens, \
     unique_sentence_percent, feature_detect, feature_matching_ratio, feature_coverage_ratio, feature_diversity, now_time
@@ -147,9 +148,6 @@ def generate(dataloader, model, device):
 # primer cop que utilitzo voluntàriament pq el necessito el name main xD
 if __name__ == "__main__":
 
-    import json
-    import argparse
-
     # Parse command line arguments. Primer hem de fet aquest pq és el que dona la id
     cmd_parser = argparse.ArgumentParser()
     cmd_parser.add_argument('id', type=str, help='model id')
@@ -175,7 +173,7 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(message)s", #f"{now_time()}%(message)s", # [%(threadName)-12.12s] [%(levelname)-5.5s] 
         handlers=[
-            logging.FileHandler(f"{args.id}/train.log"),
+            logging.FileHandler(f"out/{args.id}/test.log"),
             logging.StreamHandler()
         ]
     )
