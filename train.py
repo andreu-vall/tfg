@@ -6,10 +6,10 @@ import torch
 import argparse
 import torch.nn as nn
 from module import PETER
-from utils import DataLoader, Batchify, now_time
+from utils.peter_utils import DataLoader, Batchify, now_time
 
 
-from utils import move_content_to_device, peter_print_long, peter_content, peter_loss_good # les q he afegit jo
+from utils.andreu_utils import move_content_to_device, peter_print_long, peter_content, peter_loss_good # les q he afegit jo
 from test import test
 
 
