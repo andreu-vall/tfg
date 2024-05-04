@@ -3,10 +3,10 @@ import os
 import torch
 import torch.nn as nn
 
-from utils.peter_utils import rouge_score, bleu_score, DataLoader, Batchify, now_time, root_mean_square_error, mean_absolute_error, \
+from utils.peter import rouge_score, bleu_score, DataLoader, Batchify, now_time, root_mean_square_error, mean_absolute_error, \
     ids2tokens, unique_sentence_percent, feature_detect, feature_matching_ratio, feature_coverage_ratio, feature_diversity
 
-from utils.andreu_utils import move_content_to_device, peter_print_long, peter_loss_good # les q he afegit jo
+from utils.andreu import move_content_to_device, peter_print_long, peter_loss_good # les q he afegit jo
 
 # Té sentit importar coses de train? Per fer-lo lo del name main?
 
