@@ -1,5 +1,6 @@
 data
 out
 old
+tmp
 
 __pycache__
