@@ -1,4 +1,5 @@
 import math
+import logging
 
 from .peter import now_time
 
@@ -26,7 +27,8 @@ def peter_print_long(val_losses, rating_reg, name='validation'):
     printed_loss = t_loss
     if rating_reg != 0: # what even is rating_reg?
         printed_loss += r_loss
-    print(f"{now_time()}{peter_content(c_loss, t_loss, r_loss)} | valid loss {printed_loss:4.4f} on {name}. Real: {real_loss:4.4f}")
+    logging.info(f"{now_time()}{peter_content(c_loss, t_loss, r_loss)} | valid loss {printed_loss:4.4f} on {name}")
+    # . Real: {real_loss:4.4f}") # crec que el valor real és millor posar-lo en una altra mena de print, també en logs
 
 
 
@@ -59,3 +61,5 @@ def peter_content(context_loss, text_loss, rating_loss):
     exp_text_loss = math.exp(text_loss)
     return f"context ppl {exp_context_loss:4.4f} | text ppl {exp_text_loss:4.4f} | rating loss {rating_loss:4.4f}"
 
+
+de

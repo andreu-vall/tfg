@@ -2,9 +2,10 @@ import argparse
 import os
 import torch
 import torch.nn as nn
+import logging
 
-from utils.peter import rouge_score, bleu_score, DataLoader, Batchify, now_time, root_mean_square_error, mean_absolute_error, \
-    ids2tokens, unique_sentence_percent, feature_detect, feature_matching_ratio, feature_coverage_ratio, feature_diversity
+from utils.peter import rouge_score, bleu_score, DataLoader, Batchify, root_mean_square_error, mean_absolute_error, ids2tokens, \
+    unique_sentence_percent, feature_detect, feature_matching_ratio, feature_coverage_ratio, feature_diversity, now_time
 
 from utils.andreu import move_content_to_device, peter_print_long, peter_loss_good
 
@@ -111,32 +112,32 @@ def generate(dataloader, model, device):
     # rating
     predicted_rating = [(r, p) for (r, p) in zip(dataloader.rating.tolist(), rating_predict)] # he canviat data per dataloader
     RMSE = root_mean_square_error(predicted_rating, corpus.max_rating, corpus.min_rating)
-    print(now_time() + 'RMSE {:7.4f}'.format(RMSE))
+    logging.info(now_time() + 'RMSE {:7.4f}'.format(RMSE))
     MAE = mean_absolute_error(predicted_rating, corpus.max_rating, corpus.min_rating)
-    print(now_time() + 'MAE {:7.4f}'.format(MAE))
+    logging.info(now_time() + 'MAE {:7.4f}'.format(MAE))
     # text
     tokens_test = [ids2tokens(ids[1:], word2idx, idx2word) for ids in dataloader.seq.tolist()] # he canviat data per dataloader
     tokens_predict = [ids2tokens(ids, word2idx, idx2word) for ids in idss_predict]
     BLEU1 = bleu_score(tokens_test, tokens_predict, n_gram=1, smooth=False)
-    print(now_time() + 'BLEU-1 {:7.4f}'.format(BLEU1))
+    logging.info(now_time() + 'BLEU-1 {:7.4f}'.format(BLEU1))
     BLEU4 = bleu_score(tokens_test, tokens_predict, n_gram=4, smooth=False)
-    print(now_time() + 'BLEU-4 {:7.4f}'.format(BLEU4))
+    logging.info(now_time() + 'BLEU-4 {:7.4f}'.format(BLEU4))
     USR, USN = unique_sentence_percent(tokens_predict)
-    print(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
+    logging.info(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
     feature_batch = feature_detect(tokens_predict, feature_set)
     DIV = feature_diversity(feature_batch)  # time-consuming
-    print(now_time() + 'DIV {:7.4f}'.format(DIV))
+    logging.info(now_time() + 'DIV {:7.4f}'.format(DIV))
     FCR = feature_coverage_ratio(feature_batch, feature_set)
-    print(now_time() + 'FCR {:7.4f}'.format(FCR))
+    logging.info(now_time() + 'FCR {:7.4f}'.format(FCR))
     feature_test = [idx2word[i] for i in dataloader.feature.squeeze(1).tolist()]  # ids to words, he canviat data per dataloader
     FMR = feature_matching_ratio(feature_batch, feature_test)
-    print(now_time() + 'FMR {:7.4f}'.format(FMR))
+    logging.info(now_time() + 'FMR {:7.4f}'.format(FMR))
     text_test = [' '.join(tokens) for tokens in tokens_test]
     text_predict = [' '.join(tokens) for tokens in tokens_predict]
     tokens_context = [' '.join([idx2word[i] for i in ids]) for ids in context_predict]
     ROUGE = rouge_score(text_test, text_predict)  # a dictionary
     for (k, v) in ROUGE.items():
-        print(now_time() + '{} {:7.4f}'.format(k, v))
+        logging.info(now_time() + '{} {:7.4f}'.format(k, v))
     text_out = ''
     for (real, ctx, fake) in zip(text_test, tokens_context, text_predict):
         text_out += '{}\n{}\n{}\n\n'.format(real, ctx, fake)
@@ -169,14 +170,21 @@ if __name__ == "__main__":
 
     # Convert the merged dictionary back to a Namespace object
     args = argparse.Namespace(**merged_args)
-
-    print(args)
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s", #f"{now_time()}%(message)s", # [%(threadName)-12.12s] [%(levelname)-5.5s] 
+        handlers=[
+            logging.FileHandler(f"{args.id}/train.log"),
+            logging.StreamHandler()
+        ]
+    )
 
     model_path = os.path.join(path, 'model.pt')
 
     if torch.cuda.is_available():
         if args.cpu:
-            print(now_time() + 'WARNING: You have a CUDA device, so you should probably run without --cpu')
+            logging.info(now_time() + 'WARNING: You have a CUDA device, so you should probably run without --cpu')
     mydevice = torch.device('cuda' if not args.cpu else 'cpu')
 
 
@@ -211,13 +219,13 @@ if __name__ == "__main__":
 
     # Run on test data.
     test_losses = test(test_dataloader, mymodel, peter_loss, mydevice, args.use_feature)
-    print('=' * 89)
+    logging.info('=' * 89)
     peter_print_long(test_losses, 'test')
 
     prediction_path = os.path.join(path, args.outf)
 
-    print(now_time() + 'Generating text')
+    logging.info(now_time() + 'Generating text')
     text_o = generate(test_dataloader, mymodel, mydevice)
     with open(prediction_path, 'w', encoding='utf-8') as f:
         f.write(text_o)
-    print(now_time() + 'Generated text saved to ({})'.format(prediction_path))
+    logging.info(now_time() + 'Generated text saved to ({})'.format(prediction_path))

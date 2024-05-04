@@ -1,6 +1,7 @@
 import sys
 import os
 import datetime
+import logging
 
 import torch
 import argparse
@@ -11,13 +12,7 @@ from utils.peter import DataLoader, Batchify, now_time
 from utils.andreu import move_content_to_device, peter_print_long, peter_content, peter_loss_good
 from test import test
 
-
-# Crec que imprimir també això és força útil i important
-# el -u i la redirecció al fitxer aquí no es mostra
-print(f"{os.path.basename(sys.executable)} {' '.join(sys.argv)}")
-
-now = datetime.datetime.now()
-print(now.strftime("%Y-%m-%d %H:%M:%S"))
+start = datetime.datetime.now()
 
 
 # Potser hauria de separar entre hiperparàmetres del model i hiperparàmetres de l'entrenament
@@ -102,6 +97,20 @@ if os.path.exists(path):
 os.makedirs(path)
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s", #f"{now_time()}%(message)s", # [%(threadName)-12.12s] [%(levelname)-5.5s] 
+    handlers=[
+        logging.FileHandler(f"{args.id}/train.log"),
+        logging.StreamHandler()
+    ]
+)
+
+# Crec que imprimir també això és força útil i important
+# el -u i la redirecció al fitxer aquí no es mostra
+logging.info(f"{os.path.basename(sys.executable)} {' '.join(sys.argv)}")
+logging.info(start.strftime("%Y-%m-%d %H:%M:%S"))
+
 
 # Si en un altre lloc ja faig el logs dels arguments i aquest el vull més aviat per carregar-los en el test,
 # potser no tots els arguments són necessaris pel test (n'hi ha que són específics del train)
@@ -111,16 +120,16 @@ with open(f'out/{args.id}/train-args.txt', 'w') as f:
 
 
 
-print('-' * 40 + 'ARGUMENTS' + '-' * 40)
+logging.info('-' * 40 + 'ARGUMENTS' + '-' * 40)
 for arg in vars(args):
-    print('{:40} {}'.format(arg, getattr(args, arg)))
-print('-' * 40 + 'ARGUMENTS' + '-' * 40)
+    logging.info('{:40} {}'.format(arg, getattr(args, arg)))
+logging.info('-' * 40 + 'ARGUMENTS' + '-' * 40)
 
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
     if args.cpu:
-        print(now_time() + 'WARNING: You have a CUDA device, so you should probably run without --cpu')
+        logging.info(now_time() + 'WARNING: You have a CUDA device, so you should probably run without --cpu')
 mydevice = torch.device('cuda' if not args.cpu else 'cpu')
 
 model_path = os.path.join(path, 'model.pt')
@@ -130,7 +139,7 @@ prediction_path = os.path.join(path, args.outf)
 # Load data
 ###############################################################################
 
-print(now_time() + 'Loading data')
+logging.info(now_time() + 'Loading data')
 corpus = DataLoader(args.data_path, args.index_dir, args.vocab_size)
 word2idx = corpus.word_dict.word2idx
 pad_idx = word2idx['<pad>']
@@ -143,7 +152,7 @@ test_dataloader = Batchify(corpus.test, word2idx, args.words, args.batch_size)
 ###############################################################################
 
 if args.source_checkpoint is None:
-    print(now_time() + 'Building model')
+    logging.info(now_time() + 'Building model')
     if args.use_feature:
         src_len = 2 + train_dataloader.feature.size(1)  # [u, i, f]
     else:
@@ -156,7 +165,7 @@ if args.source_checkpoint is None:
                 args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(mydevice)
 
 else:
-    print(now_time() + 'Loading model')
+    logging.info(now_time() + 'Loading model')
     with open(args.source_checkpoint, 'rb') as f:
         mymodel = torch.load(f).to(mydevice)
 
@@ -235,7 +244,7 @@ def train_epoch(dataloader, model, loss_fn, optimizer, device, log_interval):
 
 
 def peter_print_train(context_loss, text_loss, rating_loss, batch, num_batches):
-    print(f"{now_time()}{peter_content(context_loss, text_loss, rating_loss)} | \
+    logging.info(f"{now_time()}{peter_content(context_loss, text_loss, rating_loss)} | \
           {(batch+1):5d}/{num_batches:5d} batches")
 
 
@@ -290,7 +299,9 @@ def train(model, optimizer, scheduler, train_dataloader, val_dataloader, epochs,
 
     # Hauria de guardar també el model amb 0 èpoques? It's a bit silly but I will
 
-    print(now_time() + 'Epoch 0 validation') # Crec que la validation de l'època 0 sempre és interessant
+    # Not sure ni el now_time l'hauria de seguir cridant manualemnt a tot arreu
+
+    logging.info(now_time() + 'Epoch 0 validation') # Crec que la validation de l'època 0 sempre és interessant
     val_losses = test(val_dataloader, mymodel, peter_loss, mydevice, args.use_feature)
     val_loss = val_losses[3] # real_loss for the Gradient Descent
     peter_print_long(val_losses, args.rating_reg)
@@ -299,23 +310,23 @@ def train(model, optimizer, scheduler, train_dataloader, val_dataloader, epochs,
         torch.save(model, f)
 
     if epochs == 0:
-        print(now_time() + 'No epochs to train')
+        logging.info(now_time() + 'No epochs to train')
         return []
 
 
     # De moment uso el now_time() per evitar parsejar diferent, però és kinda ugly
-    print(now_time() + 'Start training')
+    logging.info(now_time() + 'Start training')
 
     best_val_loss = val_loss
     endure_count = 0
 
     for epoch in range(1, epochs + 1):
 
-        print(f"{now_time()}epoch {epoch} train loop")
+        logging.info(f"{now_time()}epoch {epoch} train loop")
         train_losses = train_epoch(train_dataloader, model, peter_loss, optimizer, mydevice, log_interval)
         peter_print_long(train_losses, args.rating_reg, 'training')
 
-        print(f"{now_time()}epoch {epoch} validation")
+        logging.info(f"{now_time()}epoch {epoch} validation")
         val_losses = test(val_dataloader, model, peter_loss, mydevice, args.use_feature)
         peter_print_long(val_losses, args.rating_reg)
         val_loss = val_losses[3] # real_loss for the Gradient Descent
@@ -327,9 +338,9 @@ def train(model, optimizer, scheduler, train_dataloader, val_dataloader, epochs,
                 torch.save(model, f)
         else:
             endure_count += 1
-            print(f"{now_time()}Endured {endure_count}/{endure_times} time(s)")
+            logging.info(f"{now_time()}Endured {endure_count}/{endure_times} time(s)")
             if endure_count == endure_times:
-                print(now_time() + 'Cannot endure it anymore | Exiting from early stop')
+                logging.info(now_time() + 'Cannot endure it anymore | Exiting from early stop')
                 break
             
             scheduler.step()
@@ -344,7 +355,7 @@ def train(model, optimizer, scheduler, train_dataloader, val_dataloader, epochs,
             with open(model_path, 'rb') as f:
                 model = torch.load(f).to(mydevice)
 
-            print(f"{now_time()}Learning rate set to {scheduler.get_last_lr()[0]}") # Torna mútliples grups de params
+            logging.info(f"{now_time()}Learning rate set to {scheduler.get_last_lr()[0]}") # Torna mútliples grups de params
 
         # Si vulgués aturar el bucle d'entrenament a mitges, i continuar exactament a partir d'on estava,
         # hauria de guardar: model, optimizer, scheduler, epoch, endure_count, best_val_loss
