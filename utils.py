@@ -166,16 +166,20 @@ class EntityDictionary:
 
 class DataLoader:
     def __init__(self, data_path, index_dir, vocab_size):
+        review_path = os.path.join(data_path, 'reviews.pickle')
+        index_path = os.path.join(data_path, index_dir)
+
         self.word_dict = WordDictionary()
         self.user_dict = EntityDictionary()
         self.item_dict = EntityDictionary()
         self.max_rating = float('-inf')
         self.min_rating = float('inf')
-        self.initialize(data_path)
+        self.initialize(review_path)
         self.word_dict.keep_most_frequent(vocab_size)
         self.__unk = self.word_dict.word2idx['<unk>']
         self.feature_set = set()
-        self.train, self.valid, self.test = self.load_data(data_path, index_dir)
+        
+        self.train, self.valid, self.test = self.load_data(review_path, index_path)
 
     def initialize(self, data_path):
         assert os.path.exists(data_path)
@@ -183,7 +187,7 @@ class DataLoader:
         for review in reviews:
             self.user_dict.add_entity(review['user'])
             self.item_dict.add_entity(review['item'])
-            (fea, adj, tem, sco) = review['template']
+            (fea, adj, tem, sco) = review['template'] # adj and sco is ignored
             self.word_dict.add_sentence(tem)
             self.word_dict.add_word(fea)
             rating = review['rating']
@@ -264,11 +268,18 @@ class Batchify:
         self.total_step = int(math.ceil(self.sample_num / self.batch_size))
         self.step = 0
 
-    def next_batch(self):
+    def __iter__(self):
         if self.step == self.total_step:
             self.step = 0
             if self.shuffle:
                 random.shuffle(self.index_list)
+
+        return self
+    
+
+    def __next__(self):
+        if self.step >= self.total_step: # M'havia deixat això i l'iterador mai no acabava
+            raise StopIteration
 
         start = self.step * self.batch_size
         offset = min(start + self.batch_size, self.sample_num)
@@ -277,9 +288,19 @@ class Batchify:
         user = self.user[index]  # (batch_size,)
         item = self.item[index]
         rating = self.rating[index]
-        seq = self.seq[index]  # (batch_size, seq_len)
-        feature = self.feature[index]  # (batch_size, 1)
+        seq = self.seq[index] #.t()  # (batch_size, seq_len) # Should i really transpose it every step or at the start
+        # simply transpose everything?
+        feature = self.feature[index]  # (batch_size, 1) # When is the better time to transpose it?
         return user, item, rating, seq, feature
+    
+    def __len__(self):
+        return self.total_step
+    
+    # les propietats es criden sense parèntesi
+    @property
+    def total_elements(self):
+        return self.sample_num
+
 
 
 def now_time():
