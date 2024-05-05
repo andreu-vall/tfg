@@ -122,7 +122,7 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
         val_losses = test(val_dataloader, model, loss_fn, device, use_feature)
         real_loss = val_losses[3]  # real_loss for the Gradient Descent
 
-        andreu_logger.info(f"{now_time()}real_loss on training: {real_loss}") # real_loss:4.4f
+        andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4f
         peter_logger.info(peter_validation_msg(val_losses, rating_reg))
 
         # Save the model if the validation loss is the best we've seen so far.
@@ -162,7 +162,7 @@ if __name__ == "__main__":
 
     start = datetime.datetime.now()
     
-    # Potser hauria de separar entre hiperparàmetres del model i hiperparàmetres de l'entrenament
+    # Potser hauria de separar més entre hiperparàmetres del model i hiperparàmetres de l'entrenament
 
     parser = argparse.ArgumentParser()
 
@@ -222,7 +222,7 @@ if __name__ == "__main__":
 
     mylogs = os.path.join(mypath, 'logs')
     os.makedirs(mylogs)
-    peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log')
+    peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log', True) # potser per pantalla de moment puc posar els 2
     andreu_logger = setup_logger('andreu_logger', f'{mylogs}/andreu.log', True)
     history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
 
