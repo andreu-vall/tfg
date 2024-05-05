@@ -1,7 +1,14 @@
 import math
 import logging
 
-from .peter import now_time
+
+def setup_logger(name, log_file, stdout=False):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    logger.addHandler(logging.FileHandler(log_file))    # Log to file
+    if stdout:
+        logger.addHandler(logging.StreamHandler())      # Log to stdout
+    return logger
 
 
 # Moure a GPU i transposar seq i feature. Segons Copilot és més estàndard moure les coses a GPU
@@ -16,20 +23,6 @@ def move_content_to_device(content, device):
     seq = seq.t().to(device)  # (tgt_len + 1, batch_size)
     feature = feature.t().to(device)  # (1, batch_size)
     return user, item, rating, seq, feature
-
-
-
-# Això és el que feien en el PETER. Per la validació s'ignora el loss de context (i maybe tmb el de rating)
-# variables de args per la cara: rating_reg (mig solucionat però no provat yet)
-# He de borrar probably la variable rating_reg
-def peter_print_long(val_losses, rating_reg, name='validation'):
-    c_loss, t_loss, r_loss, real_loss = val_losses
-    printed_loss = t_loss
-    if rating_reg != 0: # what even is rating_reg?
-        printed_loss += r_loss
-    logging.info(f"{now_time()}{peter_content(c_loss, t_loss, r_loss)} | valid loss {printed_loss:4.4f} on {name}")
-    # . Real: {real_loss:4.4f}") # crec que el valor real és millor posar-lo en una altra mena de print, també en logs
-
 
 
 # context_reg, text_reg, rating_reg: la importància relativa de les 3 tasques a optimitzar
