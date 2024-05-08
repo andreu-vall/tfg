@@ -7,14 +7,17 @@ import json
 import torch
 import argparse
 from torch import nn
+from torch.utils.data import Subset, DataLoader
 
 from models.peter import PETER
-from utils.peter import DataLoader, Batchify, now_time
+from utils.peter import now_time # DataLoader, Batchify, 
+from utils.data import MyDataset, MySplitDataset
 from utils.andreu import move_content_to_device, peter_content, peter_loss_good, setup_logger
 from test import test
 
 
-def train_epoch(dataloader, model, loss_fn, optimizer, device, log_interval, use_feature, clip):
+# i put one hint only, in general it's better to hint all the types
+def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_interval, use_feature, clip):
 
     peter_logger = logging.getLogger("peter_logger")
     andreu_logger = logging.getLogger("andreu_logger") # Falta acabar de definir les coses que vull fer log jo
@@ -28,7 +31,8 @@ def train_epoch(dataloader, model, loss_fn, optimizer, device, log_interval, use
     
     for batch, content in enumerate(dataloader):
 
-        content = move_content_to_device(content, device)
+        content = move_content_to_device(content, device) # Aquí ja té sentit fer-ho
+        # Pel train crec que es neccessita tot transposat?
 
         user, item, rating, seq, feature = content # (batch_size, seq_len), batch += 1 (comentari ràndom PETER)
         batch_size = user.size(0)
@@ -39,7 +43,6 @@ def train_epoch(dataloader, model, loss_fn, optimizer, device, log_interval, use
             text = seq[:-1]  # (src_len + tgt_len - 2, batch_size)
 
         pred = model(user, item, text)
-
         batch_losses = loss_fn(pred, content)
         c_loss, r_loss, t_loss, loss = batch_losses
 
@@ -63,33 +66,29 @@ def train_epoch(dataloader, model, loss_fn, optimizer, device, log_interval, use
 
             context_loss, text_loss, rating_loss, real_loss = interval_average_losses
 
-            peter_logger.info(f"{now_time()}{peter_content(context_loss, text_loss, rating_loss)} | \
-                              {(batch+1):5d}/{num_batches:5d} batches")
+            peter_logger.info(
+                f"{now_time()}{peter_content(context_loss, text_loss, rating_loss)} | "
+                f"{(batch+1):5d}/{num_batches:5d} batches")
             
             interval_losses = torch.zeros(4)
             interval_sample = 0
         
-    return (total_losses / dataloader.total_elements).tolist()
-
-
-
+    return (total_losses / len(dataloader.dataset)).tolist()
 
 
 # Això és el que feien en el PETER. Per la validació s'ignora el loss de context (i maybe tmb el de rating)
-# He de borrar probably la variable rating_reg
+# Sembla bastant estrany el que imprimeixen, pq no és pas la loss real en cap lloc
 def peter_validation_msg(val_losses, rating_reg):
-    #peter_logger = logging.getLogger("peter_logger")
     c_loss, t_loss, r_loss, real_loss = val_losses
     printed_loss = t_loss
     if rating_reg != 0: # what even is rating_reg?
         printed_loss += r_loss
+    # Crec que aquí explota i no pinta res l'exponencial???
     return f"{now_time()}{peter_content(c_loss, t_loss, r_loss)} | valid loss {printed_loss:4.4f} on validation"
 
 
-
-# Varibales de args per la cara: rating_reg, use_feature
 def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader, epochs, endure_times, log_interval, \
-          device, model_path, use_feature, rating_reg):
+          device, model_path, use_feature, rating_reg, save_epoch_0=False):
 
     peter_logger = logging.getLogger("peter_logger")
     andreu_logger = logging.getLogger("andreu_logger")
@@ -97,11 +96,13 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
     andreu_logger.info(now_time() + 'Epoch 0 validation')
     val_losses = test(val_dataloader, model, loss_fn, device, use_feature)
     real_loss = val_losses[3]  # real_loss for the Gradient Descent
-
     andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4f
 
-    with open(model_path, 'wb') as f:
-        torch.save(model, f)
+    # Si faig moltes proves no em convé gaire guardar el model en època 0, si no fundiré en un moment l'espai de la SSD,
+    # tendeixen a ocupar cadascun uns 233.5 MB sense estar ni tant sols entrenat
+    if save_epoch_0:
+        with open(model_path, 'wb') as f:
+            torch.save(model, f)
 
     if epochs == 0:
         andreu_logger.info(now_time() + 'No epochs to train')
@@ -109,12 +110,13 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
 
     andreu_logger.info(now_time() + 'Start training')
 
-    best_val_loss = real_loss
+    best_val_loss = float('inf') if not save_epoch_0 else real_loss
     endure_count = 0
 
     for epoch in range(1, epochs + 1):
 
         peter_logger.info(f"{now_time()}epoch {epoch}")
+        andreu_logger.info(f"{now_time()}epoch {epoch}")
 
         train_losses = train_epoch(train_dataloader, model, loss_fn, optimizer, device, log_interval, args.use_feature, args.clip)
         andreu_logger.info(f"{now_time()}real_loss on training: {train_losses[3]}") # real_loss:4.4f
@@ -125,7 +127,11 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
         andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4f
         peter_logger.info(peter_validation_msg(val_losses, rating_reg))
 
-        # Save the model if the validation loss is the best we've seen so far.
+        # Save the model ONLY if the validation loss is the best we've seen so far.
+        # But for now NOT do the agressive approach of rollbacking to previous stages,
+        # as even if it has trained a whole epoch 1 time for all the data, in general
+        # everything is noisy and I will simply get stuck in a local minimum and don't
+        # learn anything more
         if real_loss < best_val_loss:
             best_val_loss = real_loss
             with open(model_path, 'wb') as f:
@@ -139,16 +145,16 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
             
             scheduler.step()
 
-            # Potser cal alliberar manualment memòria de la GPU? Probably not
-
-            # Carrego el millor model, perquè si no és el model que ja ha fet overfit. Crec que així és molt millor
-            # pel meu cas, tot i que sembla que no és massa estàndard fer-ho així en general. Crec que precisament
-            # no fer-ho així contribueix en gran part en la diferència entre diferentes seeds. És a dir, estan perdent
-            # el temps per una tonteria molt gran i simple i m'intenten justificar a mi que no es torna enrere,
-            # quan tornar enrere és molt fàcil i crec que donarà molts millors resultats
-            andreu_logger.info(f"a{now_time()}Loading the best model")
-            with open(model_path, 'rb') as f:
-                model = torch.load(f).to(device)
+            # L'estratègia simplement agressiva de carregar el model anterior quan hi ha un empitjorament en una època
+            # del validation set tampoc dona resultats gaire millors. En realitat és massa greedy i com m'explicaven
+            # la Maria i l'Alejandro possiblement trobar el millor camí cal passar per zones on hi ha un empitjorament
+            # temporal, tot i que si empitjora en gaires èpoques estic perdent el temps per res. De moment though ho
+            # deixo igual com ho tenien els de PETER, i si tinc temps puc provar altres coses per mirar de reduir les
+            # diferències de loss entre seeds, però aquesta estratègia tant greedy per si sol crec que no ho solucionarà
+            
+            # andreu_logger.info(f"{now_time()}Loading the best model")
+            # with open(model_path, 'rb') as f:
+            #     model = torch.load(f).to(device)
 
             andreu_logger.info(f"{now_time()}Learning rate set to {scheduler.get_last_lr()[0]}") # Torna mútliples grups de params
 
@@ -163,13 +169,13 @@ if __name__ == "__main__":
     start = datetime.datetime.now()
     
     # Potser hauria de separar més entre hiperparàmetres del model i hiperparàmetres de l'entrenament
-
     parser = argparse.ArgumentParser()
 
     # Paràmetres obligatoris (sense el -- ja es posa sol required=True)
-    parser.add_argument('id', type=str, help='model id')
+    # Crec que hauria de canviar l'ordre dels arguments pq normalment només modifico la id
     parser.add_argument('data_path', type=str, help='path for loading the pickle data')
     parser.add_argument('index_dir', type=str, help='load indexes')
+    parser.add_argument('id', type=str, help='model id')
 
     # També hi ha l'atribut útil choices per restringir els valors
     # Seria batant ideal organitzar millor els paràmetres
@@ -187,7 +193,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=1.0, help='initial learning rate') # Si learning_rate >= 1, matemàticament
     # no necessàriament hauria de convergir (suma inf teòrica), tot i que per jugar potser ho puc provar
     parser.add_argument('--clip', type=float, default=1.0, help='gradient clipping')
-    parser.add_argument('--epochs', type=int, default=50, help='upper epoch limit')
+    parser.add_argument('--epochs', type=int, default=1, help='upper epoch limit') # estava a 50, de moment poso 1 pq sempre crido amb 1
     parser.add_argument('--batch_size', type=int, default=128, help='batch size')
     parser.add_argument('--seed', type=int, default=1111, help='random seed')
     parser.add_argument('--cpu', action='store_true', help='don\'t use CUDA') # He invertit l'argument pq és més normal usar GPU
@@ -207,7 +213,9 @@ if __name__ == "__main__":
 
 
     # Crec que la PETER mask sempre era millor que la left-to-right mask! Seria millor usar-la per defecte
-    parser.add_argument('--peter_mask', action='store_true', help='True to use peter mask; Otherwise left-to-right mask')
+    # tmb canvio per default la peter_mask
+    #parser.add_argument('--peter_mask', action='store_true', help='True to use peter mask; Otherwise left-to-right mask')
+    parser.add_argument('--left_to_right_mask', action='store_true', help='True to use left-to-right mask; Otherwise peter mask')
 
 
     parser.add_argument('--use_feature', action='store_true', help='False: no feature; True: use the feature')
@@ -252,11 +260,25 @@ if __name__ == "__main__":
     ###############################################################################
 
     peter_logger.info(now_time() + 'Loading data')
-    corpus = DataLoader(args.data_path, args.index_dir, args.vocab_size)
-    word2idx = corpus.word_dict.word2idx
-    pad_idx = word2idx['<pad>']
-    train_dataloader = Batchify(corpus.train, word2idx, args.words, args.batch_size, shuffle=True)
-    val_dataloader = Batchify(corpus.valid, word2idx, args.words, args.batch_size)
+
+    # Això ho canviaré totalment
+
+    data = MyDataset(args.data_path, args.words, args.vocab_size) # tarda uns 5 segons
+    mysplitdata = MySplitDataset(args.data_path, len(data), args.index_dir, True)
+
+    def collate_fn(batch):
+        return [torch.tensor(x) for x in zip(*batch)]
+
+    train_data = Subset(data, mysplitdata.train)
+    train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+
+    val_data = Subset(data, mysplitdata.validation)
+    val_dataloader = DataLoader(val_data, batch_size=args.batch_size, collate_fn=collate_fn)
+
+    pad_idx = data.word_dict.word2idx['<pad>']
+
+    # train_dataloader = Batchify(corpus.train, word2idx, args.words, args.batch_size, shuffle=True, seed=args.seed) # he afegit seed
+    # val_dataloader = Batchify(corpus.valid, word2idx, args.words, args.batch_size)
 
     ###############################################################################
     # Build the model
@@ -264,18 +286,21 @@ if __name__ == "__main__":
 
     if args.source_checkpoint is None:
         andreu_logger.info(now_time() + 'Building model')
-        if args.use_feature:
-            src_len = 2 + train_dataloader.feature.size(1)  # [u, i, f]
-        else:
-            src_len = 2  # [u, i]
+        # if args.use_feature:
+        #     src_len = 2 + train_dataloader.feature.size(1)  # [u, i, f]
+        # else:
+        src_len = 2  # [u, i]
+
         tgt_len = args.words + 1  # added <bos> or <eos>
-        ntokens = len(corpus.word_dict)
-        nuser = len(corpus.user_dict)
-        nitem = len(corpus.item_dict)
-        mymodel = PETER(args.peter_mask, src_len, tgt_len, pad_idx, nuser, nitem, ntokens,
+        ntokens = len(data.word_dict)
+        nuser = len(data.user_dict)
+        nitem = len(data.item_dict)
+        # here i use by default the PETER mask so that i don't have to call it with --peter_mask always
+        mymodel = PETER(not args.left_to_right_mask, src_len, tgt_len, pad_idx, nuser, nitem, ntokens,
                     args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(mydevice)
 
     else:
+        assert(False)
         andreu_logger.info(now_time() + 'Loading model')
         with open(args.source_checkpoint, 'rb') as f:
             mymodel = torch.load(f).to(mydevice)
@@ -289,26 +314,21 @@ if __name__ == "__main__":
     ###############################################################################
 
     # variables de args: context_reg, text_reg, rating_red
-    peter_loss = lambda pred, content: peter_loss_good(pred, content, args.context_reg, args.text_reg, args.rating_reg,
-                                                    mytext_criterion, myrating_criterion, ntokens, tgt_len)
+    # peter_loss = lambda pred, content: peter_loss_good(pred, content, args.context_reg, args.text_reg, args.rating_reg,
+    #                                                 mytext_criterion, myrating_criterion, ntokens, tgt_len)
+    # Sense una lambda és millor d'editar coses?
+    def peter_loss(pred, content):
+        return peter_loss_good(pred, content, args.context_reg, args.text_reg, args.rating_reg, 
+                               mytext_criterion, myrating_criterion, ntokens, tgt_len)
     
-    
-    
-    # Tinc la teoria que el no descartar el model generat amb un learning_rate massa gran fa que es perdi
-    # ja molt pel que fa al resultat final del model, fent un overfitting de la òstia
 
-    # El Colab em va timar criticant el seu scheduler i que usés el ReduceLROnPlateau,
-    # però ja estava prou bé i és més fàcil de llegir el codi i dona millors resultats
-
-    # Una de les avantatges del logger és que podria usar el tqdm per exemple crec, tot i que not sure
-    # del tot pq si redirigeixo el logging també a stdout llavors no podré fer servir tampoc el tqdm.
-
+    # Aquests són els paràmetres que usava PETER, no els he provat a canviar yet
     myoptimizer = torch.optim.SGD(mymodel.parameters(), lr=args.lr) #, momentum=0.9) # de moment no li poso el momentum
     myscheduler = torch.optim.lr_scheduler.StepLR(myoptimizer, 1, gamma=0.25)
     # scheduler adjusts the learning rate according to a schedule that you define
     #   optimizer: SGD or Adam, the optimizer object that you are using to train your model
     #   step_size: the number of epochs after which you want to decrease your learning rate
-    #   gamma: the factor by which you want to decrease the learning rate (0.25)
+    
 
-    train(mymodel, peter_loss, myoptimizer, myscheduler, train_dataloader, val_dataloader, \
+    train(mymodel, peter_loss, myoptimizer, myscheduler, train_dataloader, val_dataloader,
           args.epochs, args.endure_times, args.log_interval, mydevice, mymodel_path, args.use_feature, args.rating_reg)

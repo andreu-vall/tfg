@@ -1,9 +1,5 @@
-import os
 import math
-import torch
 import heapq
-import random
-import pickle
 import datetime
 
 from .rouge import rouge
@@ -165,76 +161,6 @@ class EntityDictionary:
         return len(self.idx2entity)
 
 
-class DataLoader:
-    def __init__(self, data_path, index_dir, vocab_size):
-        review_path = os.path.join(data_path, 'reviews.pickle')
-        index_path = os.path.join(data_path, index_dir)
-
-        self.word_dict = WordDictionary()
-        self.user_dict = EntityDictionary()
-        self.item_dict = EntityDictionary()
-        self.max_rating = float('-inf')
-        self.min_rating = float('inf')
-        self.initialize(review_path)
-        self.word_dict.keep_most_frequent(vocab_size)
-        self.__unk = self.word_dict.word2idx['<unk>']
-        self.feature_set = set()
-        
-        self.train, self.valid, self.test = self.load_data(review_path, index_path)
-
-    def initialize(self, data_path):
-        assert os.path.exists(data_path)
-        reviews = pickle.load(open(data_path, 'rb'))
-        for review in reviews:
-            self.user_dict.add_entity(review['user'])
-            self.item_dict.add_entity(review['item'])
-            (fea, adj, tem, sco) = review['template'] # adj and sco is ignored
-            self.word_dict.add_sentence(tem)
-            self.word_dict.add_word(fea)
-            rating = review['rating']
-            if self.max_rating < rating:
-                self.max_rating = rating
-            if self.min_rating > rating:
-                self.min_rating = rating
-
-    def load_data(self, data_path, index_dir):
-        data = []
-        reviews = pickle.load(open(data_path, 'rb'))
-        for review in reviews:
-            (fea, adj, tem, sco) = review['template']
-            data.append({'user': self.user_dict.entity2idx[review['user']],
-                         'item': self.item_dict.entity2idx[review['item']],
-                         'rating': review['rating'],
-                         'text': self.seq2ids(tem),
-                         'feature': self.word_dict.word2idx.get(fea, self.__unk)})
-            if fea in self.word_dict.word2idx:
-                self.feature_set.add(fea)
-            else:
-                self.feature_set.add('<unk>')
-
-        train_index, valid_index, test_index = self.load_index(index_dir)
-        train, valid, test = [], [], []
-        for idx in train_index:
-            train.append(data[idx])
-        for idx in valid_index:
-            valid.append(data[idx])
-        for idx in test_index:
-            test.append(data[idx])
-        return train, valid, test
-
-    def seq2ids(self, seq):
-        return [self.word_dict.word2idx.get(w, self.__unk) for w in seq.split()]
-
-    def load_index(self, index_dir):
-        assert os.path.exists(index_dir)
-        with open(os.path.join(index_dir, 'train.index'), 'r') as f:
-            train_index = [int(x) for x in f.readline().split(' ')]
-        with open(os.path.join(index_dir, 'validation.index'), 'r') as f:
-            valid_index = [int(x) for x in f.readline().split(' ')]
-        with open(os.path.join(index_dir, 'test.index'), 'r') as f:
-            test_index = [int(x) for x in f.readline().split(' ')]
-        return train_index, valid_index, test_index
-
 
 def sentence_format(sentence, max_len, pad, bos, eos):
     length = len(sentence)
@@ -242,66 +168,6 @@ def sentence_format(sentence, max_len, pad, bos, eos):
         return [bos] + sentence[:max_len] + [eos]
     else:
         return [bos] + sentence + [eos] + [pad] * (max_len - length)
-
-
-class Batchify:
-    def __init__(self, data, word2idx, seq_len=15, batch_size=128, shuffle=False):
-        bos = word2idx['<bos>']
-        eos = word2idx['<eos>']
-        pad = word2idx['<pad>']
-        u, i, r, t, f = [], [], [], [], []
-        for x in data:
-            u.append(x['user'])
-            i.append(x['item'])
-            r.append(x['rating'])
-            t.append(sentence_format(x['text'], seq_len, pad, bos, eos))
-            f.append([x['feature']])
-
-        self.user = torch.tensor(u, dtype=torch.int64).contiguous()
-        self.item = torch.tensor(i, dtype=torch.int64).contiguous()
-        self.rating = torch.tensor(r, dtype=torch.float).contiguous()
-        self.seq = torch.tensor(t, dtype=torch.int64).contiguous()
-        self.feature = torch.tensor(f, dtype=torch.int64).contiguous()
-        self.shuffle = shuffle
-        self.batch_size = batch_size
-        self.sample_num = len(data)
-        self.index_list = list(range(self.sample_num))
-        self.total_step = int(math.ceil(self.sample_num / self.batch_size))
-        self.step = 0
-
-    def __iter__(self):
-        if self.step == self.total_step:
-            self.step = 0
-            if self.shuffle:
-                random.shuffle(self.index_list)
-
-        return self
-    
-
-    def __next__(self):
-        if self.step >= self.total_step: # M'havia deixat això i l'iterador mai no acabava
-            raise StopIteration
-
-        start = self.step * self.batch_size
-        offset = min(start + self.batch_size, self.sample_num)
-        self.step += 1
-        index = self.index_list[start:offset]
-        user = self.user[index]  # (batch_size,)
-        item = self.item[index]
-        rating = self.rating[index]
-        seq = self.seq[index] #.t()  # (batch_size, seq_len) # Should i really transpose it every step or at the start
-        # simply transpose everything?
-        feature = self.feature[index]  # (batch_size, 1) # When is the better time to transpose it?
-        return user, item, rating, seq, feature
-    
-    def __len__(self):
-        return self.total_step
-    
-    # les propietats es criden sense parèntesi
-    @property
-    def total_elements(self):
-        return self.sample_num
-
 
 
 def now_time():

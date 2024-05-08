@@ -23,7 +23,12 @@ class PETER(nn.Module):
         self.src_len = src_len
         self.pad_idx = pad_idx
         self.emsize = emsize
-        if peter_mask:
+        if peter_mask: # Crec que hauria de començar ja a tocar les màscares d'atenció, i sobretot hauria ja
+            # d'anar avançant la memòria, ni que siguin versions tontes en brut, perquè sinó arribaran les
+            # pròximes reunions i no tindré res fet i m'estressaré i tot anirà malament. No cal que faci un
+            # treball de 10, de fet és possible que ja no pugui aconseguir un treball de 10, però com a mínim
+            # he de fer un treball que de moment no tinc res fet. De fet la nota no m'importa massa, però
+            # hauria d'acabar el treball que és el que volen en la uni fer tenir tots els graus
             self.attn_mask = generate_peter_mask(src_len, tgt_len)
         else:
             self.attn_mask = generate_square_subsequent_mask(src_len + tgt_len)
@@ -72,8 +77,15 @@ class PETER(nn.Module):
         '''
         device = user.device
         batch_size = user.size(0)
+        # ojo he canviat la línia posterior a aquesta i crec que estic tenint problemes amb les transposicions en general
+
+        # print('type(text)', type(text))
+        # print('text', text)
+
         total_len = self.ui_len + text.size(0)  # deal with generation when total_len != src_len + tgt_len
         # see nn.MultiheadAttention for attn_mask and key_padding_mask
+
+        # Com acabo de dir fa un moment, hauria de seguir experimentant amb les màscares d'atenció ja
         attn_mask = self.attn_mask[:total_len, :total_len].to(device)  # (total_len, total_len)
         left = torch.zeros(batch_size, self.ui_len).bool().to(device)  # (batch_size, ui_len)
         right = text.t() == self.pad_idx  # replace pad_idx with True and others with False, (batch_size, total_len - ui_len)
@@ -85,7 +97,15 @@ class PETER(nn.Module):
         src = torch.cat([u_src, i_src, w_src], 0)  # (total_len, batch_size, emsize)
         src = src * math.sqrt(self.emsize)
         src = self.pos_encoder(src)
-        hidden, attns = self.transformer_encoder(src, attn_mask, key_padding_mask)  # (total_len, batch_size, emsize) vs. (nlayers, batch_size, total_len_tgt, total_len_src)
+
+        # Aquest és el primer pas clau de tots, aplicar el transformer a tot arreu. Perquè totes les altres coses
+        # les treuen a partir d'aquest encoding produït pel transformer. Sembla que és el tipus de transformer
+        # que codifica, i.e. el encoder only, no el encoder + decoder
+        hidden, attns = self.transformer_encoder(src, attn_mask, key_padding_mask)
+        # (total_len, batch_size, emsize) vs. (nlayers, batch_size, total_len_tgt, total_len_src)
+
+    
+
         if rating_prediction:
             rating = self.predict_rating(hidden)  # (batch_size,)
         else:

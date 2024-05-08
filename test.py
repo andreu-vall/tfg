@@ -6,13 +6,16 @@ import logging
 import json
 import sys
 
-from utils.peter import rouge_score, bleu_score, DataLoader, Batchify, root_mean_square_error, mean_absolute_error, ids2tokens, \
+from torch.utils.data import DataLoader, Subset
+
+from utils.peter import rouge_score, bleu_score, root_mean_square_error, mean_absolute_error, ids2tokens, \
     unique_sentence_percent, feature_detect, feature_matching_ratio, feature_coverage_ratio, feature_diversity, now_time
+from utils.data import MyDataset, MySplitDataset
 
 from utils.andreu import move_content_to_device, peter_content, peter_loss_good, setup_logger
 
 
-def test(dataloader, model, loss_fn, device, use_feature):
+def test(dataloader: DataLoader, model, loss_fn, device, use_feature):
     # Turn on evaluation mode which disables dropout.
     model.eval()
 
@@ -26,6 +29,10 @@ def test(dataloader, model, loss_fn, device, use_feature):
             user, item, rating, seq, feature = content
             batch_size = user.size(0)
 
+            # tinc problemes now en el test
+            # maybe això seran problemes per l'Andreu de demà...
+
+            # Yikes tinc problemes amb both feature i sense, sad :(
             if use_feature:
                 text = torch.cat([feature, seq[:-1]], 0)  # (src_len + tgt_len - 2, batch_size)
             else:
@@ -37,7 +44,7 @@ def test(dataloader, model, loss_fn, device, use_feature):
 
             total_losses += torch.tensor(losses) * batch_size
 
-    return (total_losses / dataloader.total_elements).tolist() # Crec q amb el tolist s'hauria de solucionar les referències
+    return (total_losses / len(dataloader.dataset)).tolist() # Crec q amb el tolist s'hauria de solucionar les referències
 
 
 # Aquí és on descodifica el context
@@ -50,8 +57,11 @@ def predict(log_context_dis, topk):
     return context  # (batch_size, topk)
 
 
+# Ara estic tornant a fer servir variables globals, que és molt lleig i porta to unexpected behaviour
 # Encara no he fet pràcticament res en aquesta funció
-def generate(dataloader, model, device, use_feature, words):
+# Ara mateix ja hauria d'aprendre com funciona aquesta funció, pq sinó no tinc ni idea de com es generen les paraules...
+def generate(dataloader, model, device, use_feature, words, word2idx, idx2word, feature_set, max_rating, min_rating,
+             ratings, sequences, features):
 
     peter_logger = logging.getLogger("peter_logger")
     # andreu_logger = logging.getLogger("andreu_logger") # Falta acabar de definir les coses que vull fer log jo
@@ -66,6 +76,8 @@ def generate(dataloader, model, device, use_feature, words):
 
             # this is a whole batch
             user, item, rating, seq, feature = move_content_to_device(content, device)
+
+            # En canvi per la generació de test ha de ser específicament NO transposat
 
             seq = seq.t() # ????? LOL IT WORKS PQ EN UN LLOC TRANSPOSAT I L'ALTRE NO??????
 
@@ -115,13 +127,16 @@ def generate(dataloader, model, device, use_feature, words):
             idss_predict.extend(ids)
 
     # rating
-    predicted_rating = [(r, p) for (r, p) in zip(dataloader.rating.tolist(), rating_predict)] # he canviat data per dataloader
-    RMSE = root_mean_square_error(predicted_rating, corpus.max_rating, corpus.min_rating)
+    # canviat corpus per data
+    # tinc problemes amb data i dataloader en aquí, no tinc clar exactament què haurien de ser...
+    # Per obtenir els reals ho fa d'una manera molt estranya, accedint directament al .rating o .seq
+    predicted_rating = [(r, p) for (r, p) in zip(ratings, rating_predict)] # he canviat data per dataloader
+    RMSE = root_mean_square_error(predicted_rating, max_rating, min_rating)
     peter_logger.info(now_time() + 'RMSE {:7.4f}'.format(RMSE))
-    MAE = mean_absolute_error(predicted_rating, corpus.max_rating, corpus.min_rating)
+    MAE = mean_absolute_error(predicted_rating, max_rating, min_rating)
     peter_logger.info(now_time() + 'MAE {:7.4f}'.format(MAE))
     # text
-    tokens_test = [ids2tokens(ids[1:], word2idx, idx2word) for ids in dataloader.seq.tolist()] # he canviat data per dataloader
+    tokens_test = [ids2tokens(ids[1:], word2idx, idx2word) for ids in sequences] # he canviat data per dataloader
     tokens_predict = [ids2tokens(ids, word2idx, idx2word) for ids in idss_predict]
     BLEU1 = bleu_score(tokens_test, tokens_predict, n_gram=1, smooth=False)
     peter_logger.info(now_time() + 'BLEU-1 {:7.4f}'.format(BLEU1))
@@ -129,14 +144,17 @@ def generate(dataloader, model, device, use_feature, words):
     peter_logger.info(now_time() + 'BLEU-4 {:7.4f}'.format(BLEU4))
     USR, USN = unique_sentence_percent(tokens_predict)
     peter_logger.info(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
-    feature_batch = feature_detect(tokens_predict, feature_set)
-    DIV = feature_diversity(feature_batch)  # time-consuming
-    peter_logger.info(now_time() + 'DIV {:7.4f}'.format(DIV))
-    FCR = feature_coverage_ratio(feature_batch, feature_set)
-    peter_logger.info(now_time() + 'FCR {:7.4f}'.format(FCR))
-    feature_test = [idx2word[i] for i in dataloader.feature.squeeze(1).tolist()]  # ids to words, he canviat data per dataloader
-    FMR = feature_matching_ratio(feature_batch, feature_test)
-    peter_logger.info(now_time() + 'FMR {:7.4f}'.format(FMR))
+
+    if use_feature:
+        feature_batch = feature_detect(tokens_predict, feature_set)
+        DIV = feature_diversity(feature_batch)  # time-consuming
+        peter_logger.info(now_time() + 'DIV {:7.4f}'.format(DIV))
+        FCR = feature_coverage_ratio(feature_batch, feature_set)
+        peter_logger.info(now_time() + 'FCR {:7.4f}'.format(FCR))
+        feature_test = [idx2word[i] for i in features]  # ids to words, he canviat data per dataloader
+        FMR = feature_matching_ratio(feature_batch, feature_test)
+        peter_logger.info(now_time() + 'FMR {:7.4f}'.format(FMR))
+    
     text_test = [' '.join(tokens) for tokens in tokens_test]
     text_predict = [' '.join(tokens) for tokens in tokens_predict]
     tokens_context = [' '.join([idx2word[i] for i in ids]) for ids in context_predict]
@@ -152,6 +170,9 @@ def generate(dataloader, model, device, use_feature, words):
 # primer cop que utilitzo voluntàriament pq el necessito el name main xD
 if __name__ == "__main__":
 
+    # This could be cleaned up a bit
+    # El meu modus operandis és agafar un codi que funciona i executar-lo jo i anar-lo editant per entendre'l
+
     # Parse command line arguments. Primer hem de fet aquest pq és el que dona la id
     cmd_parser = argparse.ArgumentParser()
     cmd_parser.add_argument('id', type=str, help='model id')
@@ -166,7 +187,6 @@ if __name__ == "__main__":
     
 
     mylogs = os.path.join(path, 'logs')
-    
     peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log', True) # Per tant de moment mostro per pantalla els logs de PETER
     #andreu_logger = setup_logger('andreu_logger', f'{mylogs}/andreu.log', True) # De moment pel test no he fet cap log yet
     history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
@@ -183,6 +203,8 @@ if __name__ == "__main__":
     # Convert the merged dictionary back to a Namespace object
     args = argparse.Namespace(**merged_args)
 
+    assert(args.use_feature == False) # Amb la feature encara no ho he arreglat i només petarà
+
     model_path = os.path.join(path, 'model.pt')
 
     if torch.cuda.is_available():
@@ -197,23 +219,34 @@ if __name__ == "__main__":
         mymodel = torch.load(f).to(mydevice) # Simplement he carregat el meu model enlloc del seu
 
 
-    corpus = DataLoader(args.data_path, args.index_dir, args.vocab_size)
+
+    mydata = MyDataset(args.data_path, args.words, args.vocab_size) # tarda uns 5 segons
+    mysplitdata = MySplitDataset(args.data_path, len(mydata), args.index_dir, True)
+
+    def collate_fn(batch):
+        return [torch.tensor(x) for x in zip(*batch)]
+
+    test_data = Subset(mydata, mysplitdata.test)
+    # té sentit fer el shuffle en el test???
+    test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
+
+    pad_idx = mydata.word_dict.word2idx['<pad>']
+
+
     tgt_len = args.words + 1  # added <bos> or <eos>
-    ntokens = len(corpus.word_dict)
-    word2idx = corpus.word_dict.word2idx
-    pad_idx = word2idx['<pad>']
-    test_dataloader = Batchify(corpus.test, word2idx, args.words, args.batch_size)
+    ntokens = len(mydata.word_dict)
+    myword2idx = mydata.word_dict.word2idx
 
-    idx2word = corpus.word_dict.idx2word
-    feature_set = corpus.feature_set
-
+    myidx2word = mydata.word_dict.idx2word
+    myfeature_set = mydata.feature_set
 
     mytext_criterion = nn.NLLLoss(ignore_index=pad_idx)  # És això duplicació de codi?
     myrating_criterion = nn.MSELoss()
 
-
-    peter_loss = lambda pred, content: peter_loss_good(pred, content, args.context_reg, args.text_reg, args.rating_reg,
-                                                       mytext_criterion, myrating_criterion, ntokens, tgt_len)
+    
+    def peter_loss(pred, content):
+        return peter_loss_good(pred, content, args.context_reg, args.text_reg, args.rating_reg, 
+                               mytext_criterion, myrating_criterion, ntokens, tgt_len)
 
 
     # Run on test data.
@@ -225,7 +258,21 @@ if __name__ == "__main__":
     prediction_path = os.path.join(path, args.outf)
 
     peter_logger.info(now_time() + 'Generating text')
-    text_o = generate(test_dataloader, mymodel, mydevice, args.use_feature, args.words)
+
+    ratings = [content[2] for content in test_data]
+    sequences = [content[3] for content in test_data]
+    features = [content[4] for content in test_data]
+
+    text_o = generate(test_dataloader, mymodel, mydevice, args.use_feature, args.words,
+                      myword2idx, myidx2word, myfeature_set, mydata.max_rating, mydata.min_rating,
+                      ratings, sequences, features)
+    
+    # real,
+    # context (top most probable words for this task in this order),
+    # predicted (greedy generated left to right)
+
+    # A part del format del PETER, potser puc fer el meu propi. Amb un json seria més fàcil d'interpretar per exemple
+
     with open(prediction_path, 'w', encoding='utf-8') as f:
         f.write(text_o)
     peter_logger.info(now_time() + 'Generated text saved to ({})'.format(prediction_path))

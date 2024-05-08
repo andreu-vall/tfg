@@ -200,12 +200,14 @@ class MLP(nn.Module):
         return rating
 
 
+# Triangle de 1s a la part estrictament superior i 0s a la resta
 def generate_square_subsequent_mask(total_len):
     mask = torch.tril(torch.ones(total_len, total_len))  # (total_len, total_len), lower triangle -> 1.; others 0.
     mask = mask == 0  # lower -> False; others True
     return mask
 
 
+# Exactament igual que l'anterior, amb l'única diferència que el 2n element de la 1a fila (0, 1) és False
 def generate_peter_mask(src_len, tgt_len):
     total_len = src_len + tgt_len
     mask = generate_square_subsequent_mask(total_len)
