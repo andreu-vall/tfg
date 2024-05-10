@@ -177,9 +177,12 @@ def now_time():
 
 # A partir del <eos> ja no es torna res més. Si es fes tot en paral·lel sense la list comprehension
 # potser seria més fàcil, però per 15 words potser no val la pena i perdo més temps en passar a pandas
-def ids2tokens(ids, word2idx, idx2word):
-    bos = word2idx['<bos>']
-    eos = word2idx['<eos>']
-    assert bos == ids[0]
-    eos_index = ids.index(eos) # Si no trobés el <eos> petaria, crec que ja és el que s'espera
-    return [idx2word[i] for i in ids[:eos_index+1]]
+def ids2tokens(ids, word2idx, idx2word, untrained=False):
+    if not untrained:
+        bos = word2idx['<bos>'] # El model entrenat 0 èpoques en general no em genera ni <bos> ni <eos>!!
+        eos = word2idx['<eos>']
+        assert bos == ids[0] # yikes el model sense entrenar res no genera el <bos>!!
+        eos_index = ids.index(eos) # Si no trobés el <eos> petaria, crec que ja és el que s'espera
+        return [idx2word[i] for i in ids[:eos_index+1]]
+    
+    return [idx2word[i] for i in ids]

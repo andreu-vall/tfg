@@ -85,7 +85,7 @@ def peter_validation_msg(val_losses, rating_reg):
 
 
 def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader, epochs, endure_times, log_interval, \
-          device, model_path, rating_reg, save_incomplete_model, save_final_model):
+          device, model_path, rating_reg, no_save):
 
     peter_logger = logging.getLogger("peter_logger")
     andreu_logger = logging.getLogger("andreu_logger")
@@ -93,23 +93,16 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
     andreu_logger.info(now_time() + 'epoch 0')
     val_losses = test(val_dataloader, model, loss_fn, device)
     real_loss = val_losses[3]  # real_loss for the Gradient Descent
-    andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4f
-
-    # En general crec que no cal guardar el model a l'època 0, pq si faig gaires proves cada cop que es comenci
-    # a executar el codi es guardarà el model. De fet per la mena de proves que estic fent ara que només faig
-    # 0, 1, 2 o poques èpoques relament ni val la pena guardar el model, només em serveix per gastar espai de la SSD
-    if save_incomplete_model:
-        with open(model_path, 'wb') as f:
-            torch.save(model, f)
+    andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4
 
     if epochs == 0:
         andreu_logger.info(now_time() + 'No epochs to train')
+    
     else:
+        best_val_loss = real_loss
+        endure_count = 0
         andreu_logger.info(now_time() + 'Start training')
-
-    best_val_loss = real_loss
-    endure_count = 0
-
+    
     for epoch in range(1, epochs + 1):
 
         peter_logger.info(f"{now_time()}epoch {epoch}")
@@ -131,9 +124,6 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
         # learn anything more
         if real_loss < best_val_loss:
             best_val_loss = real_loss
-            if save_incomplete_model:
-                with open(model_path, 'wb') as f:
-                    torch.save(model, f)
         else:
             endure_count += 1
             peter_logger.info(f"{now_time()}Endured {endure_count}/{endure_times} time(s)")
@@ -149,17 +139,13 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
             # temporal, tot i que si empitjora en gaires èpoques estic perdent el temps per res. De moment though ho
             # deixo igual com ho tenien els de PETER, i si tinc temps puc provar altres coses per mirar de reduir les
             # diferències de loss entre seeds, però aquesta estratègia tant greedy per si sol crec que no ho solucionarà
-            
-            # andreu_logger.info(f"{now_time()}Loading the best model")
-            # with open(model_path, 'rb') as f:
-            #     model = torch.load(f).to(device)
 
             andreu_logger.info(f"{now_time()}Learning rate set to {scheduler.get_last_lr()[0]}") # Torna mútliples grups de params
 
         # Si vulgués aturar el bucle d'entrenament a mitges, i continuar exactament a partir d'on estava,
         # hauria de guardar: model, optimizer, scheduler, epoch, endure_count, best_val_loss
     
-    if save_final_model:
+    if not no_save:
         andreu_logger.info(now_time() + 'Saving the final model to disk')
         with open(model_path, 'wb') as f:
             torch.save(model, f)
@@ -206,7 +192,7 @@ if __name__ == "__main__":
     parser.add_argument('--log_interval', type=int, default=200, help='report interval')
 
     # Whether I want a directory to load the model instead of building a new one
-    # Also whether I want to resume the training at a particular step (in case of crash). But I'll do that later
+    # Els embeddings de words es podrien somehow reutilitzar, però els embeddings dels users i items és més complicat
     parser.add_argument('--source_checkpoint', type=str, default=None, help='directory to load the model')
 
     parser.add_argument('--vocab_size', type=int, default=20000, help='keep the most frequent words in the dict')
@@ -225,7 +211,10 @@ if __name__ == "__main__":
 
     parser.add_argument('--words', type=int, default=15, help='number of words to generate for each sample')
 
-    parser.add_argument('--save_final_model', action='store_true', help='save the final model')
+    # En general crec que m'interessa guardar el model final. Si no el entrenament és totally pointless.
+    # L'únic cas quan no m'interessaria és en debugging stage quan estic provant si el meu codi funciona
+    # i executant entrenaments ràndom només per provar si funciona o no el meu codi, sense cap objectiu
+    parser.add_argument('--no_save', action='store_true', help='do not save the final model')
 
     args = parser.parse_args()
 
@@ -332,9 +321,6 @@ if __name__ == "__main__":
     # scheduler adjusts the learning rate according to a schedule that you define
     #   optimizer: SGD or Adam, the optimizer object that you are using to train your model
     #   step_size: the number of epochs after which you want to decrease your learning rate
-    
 
-    # De moment save_incomplete_model sempre False, i save_final_model només quan ho especifico explícitament,
-    # per evitar omplir la SSD de models de prova de > 200 MB
     train(mymodel, peter_loss, myoptimizer, myscheduler, train_dataloader, val_dataloader, args.epochs, args.endure_times,
-          args.log_interval, mydevice, mymodel_path, args.rating_reg, False, args.save_final_model)
+          args.log_interval, mydevice, mymodel_path, args.rating_reg, args.no_save)

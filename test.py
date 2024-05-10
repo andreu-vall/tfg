@@ -125,8 +125,9 @@ def generate(dataloader, model, device, words, word2idx, idx2word, max_rating, m
     MAE = mean_absolute_error(predicted_rating, max_rating, min_rating)
     peter_logger.info(now_time() + 'MAE {:7.4f}'.format(MAE))
     # text
-    tokens_test = [ids2tokens(ids[1:], word2idx, idx2word) for ids in sequences] # he canviat data per dataloader
-    tokens_predict = [ids2tokens(ids, word2idx, idx2word) for ids in idss_predict]
+    tokens_test = [ids2tokens(ids, word2idx, idx2word) for ids in sequences] # he canviat data per dataloader
+    tokens_predict = [ids2tokens(ids, word2idx, idx2word, untrained=True) for ids in idss_predict] # he posat que si
+    # és untrained no salti l'error si es genera una sèrie de tokens sense el <bos> ni <eos>
     BLEU1 = bleu_score(tokens_test, tokens_predict, n_gram=1, smooth=False)
     peter_logger.info(now_time() + 'BLEU-1 {:7.4f}'.format(BLEU1))
     BLEU4 = bleu_score(tokens_test, tokens_predict, n_gram=4, smooth=False)
