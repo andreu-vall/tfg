@@ -3,6 +3,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as func
 
+# Aquest és el de torch. M'és útil el codi si el miro, si no és millor usar simplement
+# l'oficial i ja. Però crec que precisament tenir aquestes coses m'ajuden molt per veure
+# jo com funcionen els transformers aquests
+# from torch.nn import TransformerEncoder
+# en C:\Users\Andreu Vall\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\transformer.py
+
 from .module import PositionalEncoding, TransformerEncoderLayer, TransformerEncoder, MLP, \
     generate_peter_mask, generate_square_subsequent_mask
 
@@ -75,6 +81,16 @@ class PETER(nn.Module):
         :return rating: (batch_size,) if rating_prediction=True; None otherwise.
         :return attns: (nlayers, batch_size, total_len, total_len)
         '''
+
+        # Entendre aquesta funció és entendre exactament que estan fent a PETER
+        # Ja que he invertit tant temps en el PETER, òbviament hauria d'entendre això,
+        # pq el meu TFG consistirà exactament en explicar això que se suposa que hauria
+        # d'haver entès i dominat molt bé
+
+        # print('text shape is', text.shape)
+        # print(text)
+        # assert(False)
+
         device = user.device
         batch_size = user.size(0)
         # ojo he canviat la línia posterior a aquesta i crec que estic tenint problemes amb les transposicions en general
@@ -82,16 +98,29 @@ class PETER(nn.Module):
         # print('type(text)', type(text))
         # print('text', text)
 
+        # Sembla que la màscara depèn de quan text has generat ja i estàs passant-lo doncs pels paràmetres
+
         total_len = self.ui_len + text.size(0)  # deal with generation when total_len != src_len + tgt_len
         # see nn.MultiheadAttention for attn_mask and key_padding_mask
 
-        # Com acabo de dir fa un moment, hauria de seguir experimentant amb les màscares d'atenció ja
+        # Sembla que l'atenció és exactament per les coses que ja hi ha generades fins ara,
+        # i possiblement amb un sol step es generi totes les paraules indepdendentment del template
+        # de fixed size a generar, l'únic que després pq hi hagi consistència entre el text generat
+        # el que es va fent es una estratègia de decoding, on la més simple que usaven en PETER
+        # és anar en cada step simplement generant una paraula més, la més probable fins on havies
+        # generat fins ara amb una més la que afegeixes ara
         attn_mask = self.attn_mask[:total_len, :total_len].to(device)  # (total_len, total_len)
+
         left = torch.zeros(batch_size, self.ui_len).bool().to(device)  # (batch_size, ui_len)
         right = text.t() == self.pad_idx  # replace pad_idx with True and others with False, (batch_size, total_len - ui_len)
         key_padding_mask = torch.cat([left, right], 1)  # (batch_size, total_len)
 
-        u_src = self.user_embeddings(user.unsqueeze(0))  # (1, batch_size, emsize)
+        # src és molt senzill, és posar-li lo de la posició i canviar els ID's per els embeddings,
+        # on al principi són coses aleatòries però es van entrenant junt amb el model per intentar
+        # minimitzar la funció de loss que vulguis definir, la qual el torch va guardant-se les
+        # coses i steps i fa la derivada automàticament, niceee
+        u_src = self.user_embeddings(user.unsqueeze(0))  # (1, batch_size, emsize) # ups havia borrat aquest línia
+        # sense volguer, ojo que no me l'hagi carregat que no crec pq era molt senzilla
         i_src = self.item_embeddings(item.unsqueeze(0))  # (1, batch_size, emsize)
         w_src = self.word_embeddings(text)  # (total_len - ui_len, batch_size, emsize)
         src = torch.cat([u_src, i_src, w_src], 0)  # (total_len, batch_size, emsize)
@@ -103,6 +132,9 @@ class PETER(nn.Module):
         # que codifica, i.e. el encoder only, no el encoder + decoder
         hidden, attns = self.transformer_encoder(src, attn_mask, key_padding_mask)
         # (total_len, batch_size, emsize) vs. (nlayers, batch_size, total_len_tgt, total_len_src)
+
+        # Això és el més important de tot el model. Entendre aquesta línia és entendre els transformers
+        # i en què estan basats tots els avenços que s'estan fent en LLM i altres coses similars
 
     
 

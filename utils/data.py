@@ -3,6 +3,7 @@ import torch
 import pickle
 import math
 import torch
+import pandas as pd
 from torch.utils.data import Dataset, random_split
 
 from .peter import WordDictionary, EntityDictionary, sentence_format, ids2tokens
@@ -51,7 +52,15 @@ from .peter import WordDictionary, EntityDictionary, sentence_format, ids2tokens
 class MyDataset(Dataset):
     # Yikes si trec d'aquí els paràmetres per defecte ho hauria de canviar a tot arreu, a bit of a pain
     def __init__(self, data_path, text_length, vocab_size, user_col='user', item_col='item',
-                 rating_col='rating', text_col=['template', 2], feature_col=['template', 0]):
+                 rating_col='rating', text_col='sentence', feature_col='feature'):
+        
+        # LOL l'he fet aquesta classe tant bé que funciona tant pel dataset de PETER com pel de Amazon?
+        # I'm a boss ngl. Calm down he canviat simplement entre 2 datasets del PETER, no he canviat encara
+        # al dataset d'Amazon
+
+        # Crec que és millor guardar la data transformada a disc un cop feta per no haver-la de fer
+        # cada cop que executo el model per fer proves ràndom. Així acceleria una part de totes
+        # les proves que faci a partir d'ara amb el mateix dataset
 
         self.user_col = user_col
         self.item_col = item_col
@@ -65,9 +74,14 @@ class MyDataset(Dataset):
         self.max_rating = float('-inf')
         self.min_rating = float('inf')
 
-        # Cal guardar les dades en el format original? Not sure, així almenys no l'hauré de carregar 2 cops
-        with open(os.path.join(data_path, 'reviews.pickle'), 'rb') as f:
-            self.original_data = pickle.load(f)
+        # Cal guardar les dades en el format original
+        # ? Not sure, així almenys no l'hauré de carregar 2 cops
+
+        # with open(os.path.join(data_path, 'reviews.pickle'), 'rb') as f:
+        #     self.original_data = pickle.load(f)
+
+        # He canviat el source
+        self.original_data = pd.read_csv(data_path + '/reviews.csv')
 
         # 1
         self.initialize_entities()
@@ -102,16 +116,17 @@ class MyDataset(Dataset):
     def transform_review(self, review):
         user = self.user_dict.entity2idx[review[self.user_col]]
         item = self.item_dict.entity2idx[review[self.item_col]]
-        rating = float(review[self.rating_col]) # it needs to be a float, because the predictions will be floats
-        # as it would be weirder to only predict integers here
-        text = self.seq2ids(self.get_maybe_internal(review, self.text_col))
+        rating = float(review[self.rating_col])     # it needs to be a float so that torch can predict a float
+        text = self.seq2ids(review[self.text_col])  # and compute a loss that's for floats not integers
         padded_text = sentence_format(text, self.text_length, self.pad, self.bos, self.eos)
+        # setic fent aquí el padding del text
         assert(len(padded_text) == self.text_length + 2) # here everything looks correct
 
         data_tuple = (user, item, rating, padded_text)
         if self.feature_col:
             # Si una feature codifica com a unkown vaya gràcia de feature xD
-            feature = self.word_dict.word2idx.get(self.get_maybe_internal(review, self.feature_col), self.__unk)
+            feature = self.word_dict.word2idx.get(review[self.feature_col], self.__unk)
+            #feature = self.word_dict.word2idx.get(self.get_maybe_internal(review, self.feature_col), self.__unk)
             data_tuple += (feature,)
             
             self.feature_set.add(feature) # crec que aquí encara que sigui unkown funcionaria
@@ -151,40 +166,44 @@ class MyDataset(Dataset):
         return self.transformed_data[idx]
     
 
-    def get_maybe_internal(self, review, column):
-        if type(column) == list:
-            assert len(column) == 2
-            first = review[column[0]]
-            return first[column[1]]
-        else:
-            return review[column]
+    # def get_maybe_internal(self, review, column):
+    #     if type(column) == list:
+    #         assert len(column) >= 2 # no té sentit una llista si només és 1?
+    #         if column[0] not in review: # Pel P5 pot ser que la sentence no aparegui en la review
+    #             return None
+    #         first = review[column[0]]
+    #         second = first[column[1]]
+    #         if len(column) == 2:
+    #             return second
+    #         else:
+    #             assert len(column) == 3
+    #             third = second[column[2]]
+    #             return third
+    #     else:
+    #         return review[column]
 
 
     # Inicialitzar les entitats de user, item; i el diccionari de words per comptar les més freqüents
     # per veure quines es descarten abans de convertir les dades a ids (pq inicialment no es pot saber)
     def initialize_entities(self):
-        for review in self.original_data:
+        for _, review in self.original_data.iterrows():
+            
             self.user_dict.add_entity(review[self.user_col])
             self.item_dict.add_entity(review[self.item_col])
-
-            text = self.get_maybe_internal(review, self.text_col)
-            self.word_dict.add_sentence(text)
-
-            # Faig algo amb la feature de moment? Might as well
-            if self.feature_col:
-                feature = self.get_maybe_internal(review, self.feature_col)
-                self.word_dict.add_word(feature)
+            self.word_dict.add_sentence(review[self.text_col])
+            if self.feature_col: # Faig algo amb la feature de moment? Might as well
+                self.word_dict.add_word(review[self.feature_col])
 
             rating = review[self.rating_col]
-            if self.max_rating < rating:
+            if rating > self.max_rating:
                 self.max_rating = rating
-            if self.min_rating > rating:
+            elif rating < self.min_rating:
                 self.min_rating = rating
 
 
     def transform_data(self):
         transformed_data = []
-        for review in self.original_data:
+        for _, review in self.original_data.iterrows():
             transformed_data.append(self.transform_review(review))
         return transformed_data
 
@@ -193,26 +212,26 @@ class MyDataset(Dataset):
         return [self.word_dict.word2idx.get(w, self.__unk) for w in seq.split()]
 
 
-
+# It doesn't load the dataset, just creates splits based on the indices of the length at the folder
 class MySplitDataset:
 
     def __init__(self, data_path, data_length, index_dir, load_split=False,
-                 train_ratio=0.8, validation_ratio=0.1, test_ratio=0.1, seed=42):
+                 train_ratio=0.8, valid_ratio=0.1, test_ratio=0.1, seed=42):
 
         self.data_path = data_path
         self.data_length = data_length
         self.index_dir = str(index_dir)
 
-        self.names = ['train', 'validation', 'test']
+        self.names = ['train', 'valid', 'test']
 
         if load_split:
             assert os.path.exists(os.path.join(self.data_path, self.index_dir))
             self.load_split()
-            lengths = [len(self.train), len(self.validation), len(self.test)]
+            lengths = [len(self.train), len(self.valid), len(self.test)]
             ratios = [length / data_length for length in lengths]
-            self.train_ratio, self.validation_ratio, self.test_ratio = ratios
+            self.train_ratio, self.valid_ratio, self.test_ratio = ratios
         else:
-            self.train_ratio, self.validation_ratio, self.test_ratio = train_ratio, validation_ratio, test_ratio
+            self.train_ratio, self.valid_ratio, self.test_ratio = train_ratio, valid_ratio, test_ratio
             self.create_split(seed)
             split_folder = os.path.join(self.data_path, self.index_dir)
             assert not os.path.exists(split_folder)
@@ -224,18 +243,18 @@ class MySplitDataset:
         for name in self.names:
             with open(f"{self.data_path}/{self.index_dir}/{name}.index", 'r') as f:
                 split[name] = [int(x) for x in f.readline().split()]
-        self.train, self.validation, self.test = split['train'], split['validation'], split['test']
+        self.train, self.valid, self.test = split['train'], split['valid'], split['test']
 
     def save_split(self):
-        split = {'train': self.train, 'validation': self.validation, 'test': self.test}
+        split = {'train': self.train, 'valid': self.valid, 'test': self.test}
         for name in self.names:
             with open(f"{self.data_path}/{self.index_dir}/{name}.index", 'w') as f:
                 f.write(' '.join(map(str, split[name])))
 
     def create_split(self, seed):
-        assert math.isclose(self.train_ratio + self.validation_ratio + self.test_ratio, 1, rel_tol=1e-7)
+        assert math.isclose(self.train_ratio + self.valid_ratio + self.test_ratio, 1, rel_tol=1e-7)
         fixed_generator = torch.Generator().manual_seed(seed)
-        split_generator = random_split(range(self.data_length), [self.train_ratio, self.validation_ratio, self.test_ratio],
+        split_generator = random_split(range(self.data_length), [self.train_ratio, self.valid_ratio, self.test_ratio],
                                        generator=fixed_generator)
         splits = [sorted(s) for s in split_generator] # sort just because it's simpler to read the file this way
-        self.train, self.validation, self.test = splits
+        self.train, self.valid, self.test = splits

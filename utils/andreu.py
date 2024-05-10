@@ -35,7 +35,28 @@ def move_content_to_device(content, device):
 # context_reg, text_reg, rating_reg: la importància relativa de les 3 tasques a optimitzar
 def peter_loss_good(pred, content, context_reg, text_reg, rating_reg, text_criterion, rating_criterion, ntokens, tgt_len):
 
+    # Això és la clau de l'entrenament. Depenen del que si posis loss aprendrà a fer una
+    # cosa o altra el model
+
     user, item, rating, seq, feature = content
+    
+    # content és el real, la cosa del batch sencer que em dona algun DataLoader
+    # pred és el predicted amb model(user, item, text)
+    # Hi ha un pas intermig on es calcula un hidden amb el transformer_encoder
+    # i després es descodifiquen coses derivades d'aquest:
+    # concretament és [log_word_prob, log_context_dis, rating, attns]
+
+    # rating usa un MLP i hidden[0]
+    # log_context_dis simplement literalment descodifica hidden[1] com a words and calls it el context
+    # log_word_prob simplement literalment descodifica hidden[2:]
+        # Hi ha el cas especial que no acabo d'entendre del tot que només descodifica una única paraula
+        # crec que és per quan fa el decoding, que en realitat ho fa bastant estrany. No sé si és gaire
+        # estàndard fer-ho així manualment, o si s'usen Decoders més sofisticats
+
+    # Per descodificar aquestes dues coses s'utilitza un nn.Linear(emsize, ntoken),
+    # de manera que crec que dona totes les probabilitats per tots els tokens del model
+
+
 
     log_word_prob, log_context_dis, rating_p, _ = pred  # (tgt_len, batch_size, ntoken) vs. (batch_size, ntoken) vs. (batch_size,)
     context_dis = log_context_dis.unsqueeze(0).repeat((tgt_len - 1, 1, 1))  # (batch_size, ntoken) -> (tgt_len - 1, batch_size, ntoken)

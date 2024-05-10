@@ -37,6 +37,8 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_i
         user, item, rating, seq, feature = content # (batch_size, seq_len), batch += 1 (comentari ràndom PETER)
         batch_size = user.size(0)
  
+        # Això és tota la diferència en l'entrenament de use_feature or not. Simplement quan s'usa feature
+        # es concatena després de seq[:-1] la 1 única feature que hi ha per cada seqüència
         if use_feature:
             text = torch.cat([feature, seq[:-1]], 0)  # (src_len + tgt_len - 2, batch_size)
         else:
@@ -88,29 +90,29 @@ def peter_validation_msg(val_losses, rating_reg):
 
 
 def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader, epochs, endure_times, log_interval, \
-          device, model_path, use_feature, rating_reg, save_epoch_0=False):
+          device, model_path, use_feature, rating_reg, save_incomplete_model, save_final_model):
 
     peter_logger = logging.getLogger("peter_logger")
     andreu_logger = logging.getLogger("andreu_logger")
 
-    andreu_logger.info(now_time() + 'Epoch 0 validation')
+    andreu_logger.info(now_time() + 'epoch 0')
     val_losses = test(val_dataloader, model, loss_fn, device, use_feature)
     real_loss = val_losses[3]  # real_loss for the Gradient Descent
     andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4f
 
-    # Si faig moltes proves no em convé gaire guardar el model en època 0, si no fundiré en un moment l'espai de la SSD,
-    # tendeixen a ocupar cadascun uns 233.5 MB sense estar ni tant sols entrenat
-    if save_epoch_0:
+    # En general crec que no cal guardar el model a l'època 0, pq si faig gaires proves cada cop que es comenci
+    # a executar el codi es guardarà el model. De fet per la mena de proves que estic fent ara que només faig
+    # 0, 1, 2 o poques èpoques relament ni val la pena guardar el model, només em serveix per gastar espai de la SSD
+    if save_incomplete_model:
         with open(model_path, 'wb') as f:
             torch.save(model, f)
 
     if epochs == 0:
         andreu_logger.info(now_time() + 'No epochs to train')
-        return
+    else:
+        andreu_logger.info(now_time() + 'Start training')
 
-    andreu_logger.info(now_time() + 'Start training')
-
-    best_val_loss = float('inf') if not save_epoch_0 else real_loss
+    best_val_loss = real_loss
     endure_count = 0
 
     for epoch in range(1, epochs + 1):
@@ -134,8 +136,9 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
         # learn anything more
         if real_loss < best_val_loss:
             best_val_loss = real_loss
-            with open(model_path, 'wb') as f:
-                torch.save(model, f)
+            if save_incomplete_model:
+                with open(model_path, 'wb') as f:
+                    torch.save(model, f)
         else:
             endure_count += 1
             peter_logger.info(f"{now_time()}Endured {endure_count}/{endure_times} time(s)")
@@ -160,6 +163,14 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
 
         # Si vulgués aturar el bucle d'entrenament a mitges, i continuar exactament a partir d'on estava,
         # hauria de guardar: model, optimizer, scheduler, epoch, endure_count, best_val_loss
+    
+    if save_final_model:
+        andreu_logger.info(now_time() + 'Saving the final model to disk')
+        with open(model_path, 'wb') as f:
+            torch.save(model, f)
+    else:
+        andreu_logger.info(now_time() + 'Not saving the final model to disk')
+
 
 
 
@@ -221,6 +232,8 @@ if __name__ == "__main__":
     parser.add_argument('--use_feature', action='store_true', help='False: no feature; True: use the feature')
     parser.add_argument('--words', type=int, default=15, help='number of words to generate for each sample')
 
+    parser.add_argument('--save_final_model', action='store_true', help='save the final model')
+
     args = parser.parse_args()
 
     mypath = os.path.join('out', args.id)
@@ -232,8 +245,8 @@ if __name__ == "__main__":
     os.makedirs(mylogs)
     peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log', True) # potser per pantalla de moment puc posar els 2
     andreu_logger = setup_logger('andreu_logger', f'{mylogs}/andreu.log', True)
-    history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
 
+    history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
     history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
 
     # Si en un altre lloc ja faig el logs dels arguments i aquest el vull més aviat per carregar-los en el test,
@@ -267,12 +280,14 @@ if __name__ == "__main__":
     mysplitdata = MySplitDataset(args.data_path, len(data), args.index_dir, True)
 
     def collate_fn(batch):
+        print('batch:', batch)
+        
         return [torch.tensor(x) for x in zip(*batch)]
 
     train_data = Subset(data, mysplitdata.train)
     train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
 
-    val_data = Subset(data, mysplitdata.validation)
+    val_data = Subset(data, mysplitdata.valid)
     val_dataloader = DataLoader(val_data, batch_size=args.batch_size, collate_fn=collate_fn)
 
     pad_idx = data.word_dict.word2idx['<pad>']
@@ -330,5 +345,7 @@ if __name__ == "__main__":
     #   step_size: the number of epochs after which you want to decrease your learning rate
     
 
-    train(mymodel, peter_loss, myoptimizer, myscheduler, train_dataloader, val_dataloader,
-          args.epochs, args.endure_times, args.log_interval, mydevice, mymodel_path, args.use_feature, args.rating_reg)
+    # De moment save_incomplete_model sempre False, i save_final_model només quan ho especifico explícitament,
+    # per evitar omplir la SSD de models de prova de > 200 MB
+    train(mymodel, peter_loss, myoptimizer, myscheduler, train_dataloader, val_dataloader, args.epochs, args.endure_times,
+          args.log_interval, mydevice, mymodel_path, args.use_feature, args.rating_reg, False, args.save_final_model)

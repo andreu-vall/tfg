@@ -1,5 +1,7 @@
 data
+raw_data
 out
+
 tmp
 
 __pycache__
