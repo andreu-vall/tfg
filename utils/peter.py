@@ -125,6 +125,7 @@ class WordDictionary:
         self.word2idx = {w: i for i, w in enumerate(self.idx2word)}
         self.__word2count = {}
 
+    # naive space splitting
     def add_sentence(self, sentence):
         for w in sentence.split():
             self.add_word(w)
@@ -140,7 +141,7 @@ class WordDictionary:
     def __len__(self):
         return len(self.idx2word)
 
-    def keep_most_frequent(self, max_vocab_size=20000):
+    def keep_most_frequent(self, max_vocab_size=20_000):
         if len(self.__word2count) > max_vocab_size:
             frequent_words = heapq.nlargest(max_vocab_size, self.__word2count, key=self.__word2count.get)
             self.idx2word = self.idx2word[:self.__predefine_num] + frequent_words
@@ -174,13 +175,11 @@ def now_time():
     return '[' + datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f') + ']: '
 
 
+# A partir del <eos> ja no es torna res més. Si es fes tot en paral·lel sense la list comprehension
+# potser seria més fàcil, però per 15 words potser no val la pena i perdo més temps en passar a pandas
 def ids2tokens(ids, word2idx, idx2word):
+    bos = word2idx['<bos>']
     eos = word2idx['<eos>']
-    tokens = []
-    for i in ids:
-        if i == eos:
-            break
-        tokens.append(idx2word[i])
-    return tokens
-
-
+    assert bos == ids[0]
+    eos_index = ids.index(eos) # Si no trobés el <eos> petaria, crec que ja és el que s'espera
+    return [idx2word[i] for i in ids[:eos_index+1]]
