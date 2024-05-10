@@ -18,7 +18,7 @@ def setup_logger(name, log_file, stdout=False):
 # si cal en el train enlloc del dataloader, perquè així compta en el temps del train
 # Hauria ara de definit on vull fer les transposicions jo i per què
 def move_content_to_device(content, device):
-    user, item, rating, seq, feature = content
+    user, item, rating, seq = content
     # batch_size = user.size(0)
 
     user = user.to(device)  # (batch_size,)
@@ -27,9 +27,8 @@ def move_content_to_device(content, device):
 
     # Amb això de la transposició he de decidir si la faig i a on i per què
     seq = seq.t().to(device)    # (tgt_len + 1, batch_size)
-    feature = feature.t().to(device)  # (1, batch_size)
     
-    return user, item, rating, seq, feature
+    return user, item, rating, seq
 
 
 # context_reg, text_reg, rating_reg: la importància relativa de les 3 tasques a optimitzar
@@ -38,7 +37,7 @@ def peter_loss_good(pred, content, context_reg, text_reg, rating_reg, text_crite
     # Això és la clau de l'entrenament. Depenen del que si posis loss aprendrà a fer una
     # cosa o altra el model
 
-    user, item, rating, seq, feature = content
+    user, item, rating, seq = content
     
     # content és el real, la cosa del batch sencer que em dona algun DataLoader
     # pred és el predicted amb model(user, item, text)

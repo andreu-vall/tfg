@@ -9,13 +9,13 @@ import sys
 from torch.utils.data import DataLoader, Subset
 
 from utils.peter import rouge_score, bleu_score, root_mean_square_error, mean_absolute_error, ids2tokens, \
-    unique_sentence_percent, feature_detect, feature_matching_ratio, feature_coverage_ratio, feature_diversity, now_time
+    unique_sentence_percent, now_time
 from utils.data import MyDataset, MySplitDataset
 
 from utils.andreu import move_content_to_device, peter_content, peter_loss_good, setup_logger
 
 
-def test(dataloader: DataLoader, model, loss_fn, device, use_feature):
+def test(dataloader: DataLoader, model, loss_fn, device):
     # Turn on evaluation mode which disables dropout.
     model.eval()
 
@@ -26,17 +26,10 @@ def test(dataloader: DataLoader, model, loss_fn, device, use_feature):
 
             content = move_content_to_device(content, device)
 
-            user, item, rating, seq, feature = content
+            user, item, rating, seq = content
             batch_size = user.size(0)
 
-            # tinc problemes now en el test
-            # maybe això seran problemes per l'Andreu de demà...
-
-            # Yikes tinc problemes amb both feature i sense, sad :(
-            if use_feature:
-                text = torch.cat([feature, seq[:-1]], 0)  # (src_len + tgt_len - 2, batch_size)
-            else:
-                text = seq[:-1]  # (src_len + tgt_len - 2, batch_size)
+            text = seq[:-1]  # (src_len + tgt_len - 2, batch_size)
 
             pred = model(user, item, text)
 
@@ -60,8 +53,8 @@ def predict(log_context_dis, topk):
 # Ara estic tornant a fer servir variables globals, que és molt lleig i porta to unexpected behaviour
 # Encara no he fet pràcticament res en aquesta funció
 # Ara mateix ja hauria d'aprendre com funciona aquesta funció, pq sinó no tinc ni idea de com es generen les paraules...
-def generate(dataloader, model, device, use_feature, words, word2idx, idx2word, feature_set, max_rating, min_rating,
-             ratings, sequences, features):
+def generate(dataloader, model, device, words, word2idx, idx2word, max_rating, min_rating,
+             ratings, sequences):
 
     peter_logger = logging.getLogger("peter_logger")
     # andreu_logger = logging.getLogger("andreu_logger") # Falta acabar de definir les coses que vull fer log jo
@@ -75,7 +68,7 @@ def generate(dataloader, model, device, use_feature, words, word2idx, idx2word, 
         for content in dataloader:
 
             # this is a whole batch
-            user, item, rating, seq, feature = move_content_to_device(content, device)
+            user, item, rating, seq = move_content_to_device(content, device)
 
             # En canvi per la generació de test ha de ser específicament NO transposat
 
@@ -83,12 +76,8 @@ def generate(dataloader, model, device, use_feature, words, word2idx, idx2word, 
 
             bos = seq[:, 0].unsqueeze(0).to(device)  # (1, batch_size) # Maybe no funca?
 
-            # Obvi que amb la feature donarà millors resultats, si l'estàs utilizant com
-            # a cosa a partir de la qual començar a generar el text del output de l'explicació
-            if use_feature:
-                text = torch.cat([feature, bos], 0)  # (src_len - 1, batch_size)
-            else:
-                text = bos  # (src_len - 1, batch_size)
+            text = bos  # (src_len - 1, batch_size)
+
             start_idx = text.size(0)
             for idx in range(words):
                 # produce a word at each step
@@ -144,16 +133,6 @@ def generate(dataloader, model, device, use_feature, words, word2idx, idx2word, 
     peter_logger.info(now_time() + 'BLEU-4 {:7.4f}'.format(BLEU4))
     USR, USN = unique_sentence_percent(tokens_predict)
     peter_logger.info(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
-
-    if use_feature:
-        feature_batch = feature_detect(tokens_predict, feature_set)
-        DIV = feature_diversity(feature_batch)  # time-consuming
-        peter_logger.info(now_time() + 'DIV {:7.4f}'.format(DIV))
-        FCR = feature_coverage_ratio(feature_batch, feature_set)
-        peter_logger.info(now_time() + 'FCR {:7.4f}'.format(FCR))
-        feature_test = [idx2word[i] for i in features]  # ids to words, he canviat data per dataloader
-        FMR = feature_matching_ratio(feature_batch, feature_test)
-        peter_logger.info(now_time() + 'FMR {:7.4f}'.format(FMR))
     
     text_test = [' '.join(tokens) for tokens in tokens_test]
     text_predict = [' '.join(tokens) for tokens in tokens_predict]
@@ -203,8 +182,6 @@ if __name__ == "__main__":
     # Convert the merged dictionary back to a Namespace object
     args = argparse.Namespace(**merged_args)
 
-    assert(args.use_feature == False) # Amb la feature encara no ho he arreglat i només petarà
-
     model_path = os.path.join(path, 'model.pt')
 
     if torch.cuda.is_available():
@@ -238,7 +215,6 @@ if __name__ == "__main__":
     myword2idx = mydata.word_dict.word2idx
 
     myidx2word = mydata.word_dict.idx2word
-    myfeature_set = mydata.feature_set
 
     mytext_criterion = nn.NLLLoss(ignore_index=pad_idx)  # És això duplicació de codi?
     myrating_criterion = nn.MSELoss()
@@ -250,7 +226,7 @@ if __name__ == "__main__":
 
 
     # Run on test data.
-    test_losses = test(test_dataloader, mymodel, peter_loss, mydevice, args.use_feature)
+    test_losses = test(test_dataloader, mymodel, peter_loss, mydevice)
     c_loss, t_loss, r_loss, loss = test_losses
     peter_logger.info('=' * 89)
     peter_logger.info(f"{now_time()}{peter_content(c_loss, t_loss, r_loss)} on test")
@@ -261,11 +237,9 @@ if __name__ == "__main__":
 
     ratings = [content[2] for content in test_data]
     sequences = [content[3] for content in test_data]
-    features = [content[4] for content in test_data]
 
-    text_o = generate(test_dataloader, mymodel, mydevice, args.use_feature, args.words,
-                      myword2idx, myidx2word, myfeature_set, mydata.max_rating, mydata.min_rating,
-                      ratings, sequences, features)
+    text_o = generate(test_dataloader, mymodel, mydevice, args.words, myword2idx, myidx2word,
+                      mydata.max_rating, mydata.min_rating, ratings, sequences)
     
     # real,
     # context (top most probable words for this task in this order),

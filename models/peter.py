@@ -87,16 +87,9 @@ class PETER(nn.Module):
         # pq el meu TFG consistirà exactament en explicar això que se suposa que hauria
         # d'haver entès i dominat molt bé
 
-        # print('text shape is', text.shape)
-        # print(text)
-        # assert(False)
-
         device = user.device
         batch_size = user.size(0)
         # ojo he canviat la línia posterior a aquesta i crec que estic tenint problemes amb les transposicions en general
-
-        # print('type(text)', type(text))
-        # print('text', text)
 
         # Sembla que la màscara depèn de quan text has generat ja i estàs passant-lo doncs pels paràmetres
 

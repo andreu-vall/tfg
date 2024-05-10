@@ -17,7 +17,7 @@ from test import test
 
 
 # i put one hint only, in general it's better to hint all the types
-def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_interval, use_feature, clip):
+def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_interval, clip):
 
     peter_logger = logging.getLogger("peter_logger")
     andreu_logger = logging.getLogger("andreu_logger") # Falta acabar de definir les coses que vull fer log jo
@@ -34,15 +34,10 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_i
         content = move_content_to_device(content, device) # Aquí ja té sentit fer-ho
         # Pel train crec que es neccessita tot transposat?
 
-        user, item, rating, seq, feature = content # (batch_size, seq_len), batch += 1 (comentari ràndom PETER)
+        user, item, rating, seq = content # (batch_size, seq_len), batch += 1 (comentari ràndom PETER)
         batch_size = user.size(0)
  
-        # Això és tota la diferència en l'entrenament de use_feature or not. Simplement quan s'usa feature
-        # es concatena després de seq[:-1] la 1 única feature que hi ha per cada seqüència
-        if use_feature:
-            text = torch.cat([feature, seq[:-1]], 0)  # (src_len + tgt_len - 2, batch_size)
-        else:
-            text = seq[:-1]  # (src_len + tgt_len - 2, batch_size)
+        text = seq[:-1]  # (src_len + tgt_len - 2, batch_size)
 
         pred = model(user, item, text)
         batch_losses = loss_fn(pred, content)
@@ -90,13 +85,13 @@ def peter_validation_msg(val_losses, rating_reg):
 
 
 def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader, epochs, endure_times, log_interval, \
-          device, model_path, use_feature, rating_reg, save_incomplete_model, save_final_model):
+          device, model_path, rating_reg, save_incomplete_model, save_final_model):
 
     peter_logger = logging.getLogger("peter_logger")
     andreu_logger = logging.getLogger("andreu_logger")
 
     andreu_logger.info(now_time() + 'epoch 0')
-    val_losses = test(val_dataloader, model, loss_fn, device, use_feature)
+    val_losses = test(val_dataloader, model, loss_fn, device)
     real_loss = val_losses[3]  # real_loss for the Gradient Descent
     andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4f
 
@@ -120,10 +115,10 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
         peter_logger.info(f"{now_time()}epoch {epoch}")
         andreu_logger.info(f"{now_time()}epoch {epoch}")
 
-        train_losses = train_epoch(train_dataloader, model, loss_fn, optimizer, device, log_interval, args.use_feature, args.clip)
+        train_losses = train_epoch(train_dataloader, model, loss_fn, optimizer, device, log_interval, args.clip)
         andreu_logger.info(f"{now_time()}real_loss on training: {train_losses[3]}") # real_loss:4.4f
 
-        val_losses = test(val_dataloader, model, loss_fn, device, use_feature)
+        val_losses = test(val_dataloader, model, loss_fn, device)
         real_loss = val_losses[3]  # real_loss for the Gradient Descent
 
         andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4f
@@ -228,8 +223,6 @@ if __name__ == "__main__":
     #parser.add_argument('--peter_mask', action='store_true', help='True to use peter mask; Otherwise left-to-right mask')
     parser.add_argument('--left_to_right_mask', action='store_true', help='True to use left-to-right mask; Otherwise peter mask')
 
-
-    parser.add_argument('--use_feature', action='store_true', help='False: no feature; True: use the feature')
     parser.add_argument('--words', type=int, default=15, help='number of words to generate for each sample')
 
     parser.add_argument('--save_final_model', action='store_true', help='save the final model')
@@ -280,8 +273,6 @@ if __name__ == "__main__":
     mysplitdata = MySplitDataset(args.data_path, len(data), args.index_dir, True)
 
     def collate_fn(batch):
-        print('batch:', batch)
-        
         return [torch.tensor(x) for x in zip(*batch)]
 
     train_data = Subset(data, mysplitdata.train)
@@ -301,9 +292,7 @@ if __name__ == "__main__":
 
     if args.source_checkpoint is None:
         andreu_logger.info(now_time() + 'Building model')
-        # if args.use_feature:
-        #     src_len = 2 + train_dataloader.feature.size(1)  # [u, i, f]
-        # else:
+        
         src_len = 2  # [u, i]
 
         tgt_len = args.words + 1  # added <bos> or <eos>
@@ -348,4 +337,4 @@ if __name__ == "__main__":
     # De moment save_incomplete_model sempre False, i save_final_model només quan ho especifico explícitament,
     # per evitar omplir la SSD de models de prova de > 200 MB
     train(mymodel, peter_loss, myoptimizer, myscheduler, train_dataloader, val_dataloader, args.epochs, args.endure_times,
-          args.log_interval, mydevice, mymodel_path, args.use_feature, args.rating_reg, False, args.save_final_model)
+          args.log_interval, mydevice, mymodel_path, args.rating_reg, False, args.save_final_model)
