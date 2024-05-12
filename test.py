@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Subset
 from utils.peter import rouge_score, bleu_score, root_mean_square_error, mean_absolute_error, \
     unique_sentence_percent, now_time, content, loss
 
-from utils.data import MyDataset, MySplitDataset, setup_logger, move_to_device
+from utils.andreu import MyDataset, MySplitDataset, setup_logger, move_to_device
 
 
 def test(dataloader: DataLoader, model, loss_fn, device):

@@ -11,7 +11,7 @@ from torch.utils.data import Subset, DataLoader
 
 from models.peter import PETER
 from utils.peter import now_time, content, loss
-from utils.data import MyDataset, MySplitDataset, setup_logger, move_to_device
+from utils.andreu import MyDataset, MySplitDataset, setup_logger, move_to_device
 from test import test
 
 
