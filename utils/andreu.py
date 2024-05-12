@@ -186,6 +186,8 @@ class MyDataset(Dataset):
 
     @staticmethod
     def load(filename):
+        # UPS si es canvia l'estructura del fitxer i/o atributs peta i ja no es poden
+        # aprofitar els checkpoints, com el que em passava amb el POD
         with open(filename, 'rb') as f:
             return pickle.load(f)
         
