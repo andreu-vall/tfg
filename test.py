@@ -8,11 +8,10 @@ import sys
 
 from torch.utils.data import DataLoader, Subset
 
-from utils.peter import rouge_score, bleu_score, root_mean_square_error, mean_absolute_error, ids2tokens, \
-    unique_sentence_percent, now_time
-from utils.data import MyDataset, MySplitDataset
+from utils.peter import rouge_score, bleu_score, root_mean_square_error, mean_absolute_error, \
+    unique_sentence_percent, now_time, content, loss
 
-from utils.andreu import move_content_to_device, peter_content, peter_loss_good, setup_logger
+from utils.data import MyDataset, MySplitDataset, setup_logger, move_to_device
 
 
 def test(dataloader: DataLoader, model, loss_fn, device):
@@ -22,22 +21,22 @@ def test(dataloader: DataLoader, model, loss_fn, device):
     total_losses = torch.zeros(4)
     
     with torch.no_grad():
-        for content in dataloader:
+        
+        for real in dataloader:
 
-            content = move_content_to_device(content, device)
-
-            user, item, rating, seq = content
+            real = move_to_device(real, device, transpose_seq=True) # en el test tmb ho transposaven
+            user, item, rating, seq = real
             batch_size = user.size(0)
 
             text = seq[:-1]  # (src_len + tgt_len - 2, batch_size)
 
-            pred = model(user, item, text)
+            predicted = model(user, item, text)
 
-            losses = loss_fn(pred, content) # [c_loss, r_loss, t_loss, loss] # al revés?
+            losses = loss_fn(predicted, real) # [c_loss, r_loss, t_loss, loss]
 
             total_losses += torch.tensor(losses) * batch_size
 
-    return (total_losses / len(dataloader.dataset)).tolist() # Crec q amb el tolist s'hauria de solucionar les referències
+    return (total_losses / len(dataloader.dataset)).tolist()
 
 
 # Aquí és on descodifica el context
@@ -53,8 +52,9 @@ def predict(log_context_dis, topk):
 # Ara estic tornant a fer servir variables globals, que és molt lleig i porta to unexpected behaviour
 # Encara no he fet pràcticament res en aquesta funció
 # Ara mateix ja hauria d'aprendre com funciona aquesta funció, pq sinó no tinc ni idea de com es generen les paraules...
-def generate(dataloader, model, device, words, word2idx, idx2word, max_rating, min_rating,
-             ratings, sequences):
+# És com si ho fes del tot manual. Si ho fes tot d'una tirada potser li sortirien 16 paraules que no estan connectades,
+# perquè les genera totes en paral·lel
+def generate(data, dataloader, model, device, words, word2idx, idx2word, max_rating, min_rating, ratings, sequences):
 
     peter_logger = logging.getLogger("peter_logger")
     # andreu_logger = logging.getLogger("andreu_logger") # Falta acabar de definir les coses que vull fer log jo
@@ -65,14 +65,11 @@ def generate(dataloader, model, device, words, word2idx, idx2word, max_rating, m
     context_predict = []
     rating_predict = []
     with torch.no_grad():
-        for content in dataloader:
 
-            # this is a whole batch
-            user, item, rating, seq = move_content_to_device(content, device)
+        for real in dataloader:
 
-            # En canvi per la generació de test ha de ser específicament NO transposat
-
-            seq = seq.t() # ????? LOL IT WORKS PQ EN UN LLOC TRANSPOSAT I L'ALTRE NO??????
+            real = move_to_device(real, device, transpose_seq=False) # aquí específicament NO ho transposaven
+            user, item, rating, seq = real
 
             bos = seq[:, 0].unsqueeze(0).to(device)  # (1, batch_size) # Maybe no funca?
 
@@ -125,18 +122,19 @@ def generate(dataloader, model, device, words, word2idx, idx2word, max_rating, m
     MAE = mean_absolute_error(predicted_rating, max_rating, min_rating)
     peter_logger.info(now_time() + 'MAE {:7.4f}'.format(MAE))
     # text
-    tokens_test = [ids2tokens(ids, word2idx, idx2word) for ids in sequences] # he canviat data per dataloader
-    tokens_predict = [ids2tokens(ids, word2idx, idx2word, untrained=True) for ids in idss_predict] # he posat que si
+    text_test = [data.untokenize_text(ids) for ids in sequences] # he canviat data per dataloader
+    text_predict = [data.untokenize_text(ids, wrong=True) for ids in idss_predict] # he posat que si
     # és untrained no salti l'error si es genera una sèrie de tokens sense el <bos> ni <eos>
-    BLEU1 = bleu_score(tokens_test, tokens_predict, n_gram=1, smooth=False)
+
+
+    # Ho necessita en formats de tokens per calcular aquesta mena de coses? Quite weird ngl
+    BLEU1 = bleu_score(sequences, idss_predict, n_gram=1, smooth=False)
     peter_logger.info(now_time() + 'BLEU-1 {:7.4f}'.format(BLEU1))
-    BLEU4 = bleu_score(tokens_test, tokens_predict, n_gram=4, smooth=False)
+    BLEU4 = bleu_score(sequences, idss_predict, n_gram=4, smooth=False)
     peter_logger.info(now_time() + 'BLEU-4 {:7.4f}'.format(BLEU4))
-    USR, USN = unique_sentence_percent(tokens_predict)
+    USR, USN = unique_sentence_percent(idss_predict)
     peter_logger.info(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
     
-    text_test = [' '.join(tokens) for tokens in tokens_test]
-    text_predict = [' '.join(tokens) for tokens in tokens_predict]
     tokens_context = [' '.join([idx2word[i] for i in ids]) for ids in context_predict]
     ROUGE = rouge_score(text_test, text_predict)  # a dictionary
     for (k, v) in ROUGE.items():
@@ -147,6 +145,7 @@ def generate(dataloader, model, device, words, word2idx, idx2word, max_rating, m
     return text_out
 
 
+# Encara he de netejar una mica això del main que ho tinc realment molt lleig
 # primer cop que utilitzo voluntàriament pq el necessito el name main xD
 if __name__ == "__main__":
 
@@ -197,40 +196,33 @@ if __name__ == "__main__":
         mymodel = torch.load(f).to(mydevice) # Simplement he carregat el meu model enlloc del seu
 
 
-
-    mydata = MyDataset(args.data_path, args.words, args.vocab_size) # tarda uns 5 segons
+    mydata = MyDataset.load_or_create(args.data_path, args.words, args.vocab_size)
     mysplitdata = MySplitDataset(args.data_path, len(mydata), args.index_dir, True)
-
-    def collate_fn(batch):
-        return [torch.tensor(x) for x in zip(*batch)]
 
     test_data = Subset(mydata, mysplitdata.test)
     # té sentit fer el shuffle en el test???
-    test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
-    pad_idx = mydata.word_dict.word2idx['<pad>']
+    pad_idx = mydata.pad
 
 
     tgt_len = args.words + 1  # added <bos> or <eos>
     ntokens = len(mydata.word_dict)
-    myword2idx = mydata.word_dict.word2idx
+    myword2idx = mydata.word_dict.entity_to_idx
 
-    myidx2word = mydata.word_dict.idx2word
+    myidx2word = mydata.word_dict.idx_to_entity
 
     mytext_criterion = nn.NLLLoss(ignore_index=pad_idx)  # És això duplicació de codi?
     myrating_criterion = nn.MSELoss()
 
-    
-    def peter_loss(pred, content):
-        return peter_loss_good(pred, content, args.context_reg, args.text_reg, args.rating_reg, 
-                               mytext_criterion, myrating_criterion, ntokens, tgt_len)
-
+    peter_loss = lambda predicted, real: loss(predicted, real, args.context_reg, args.text_reg, args.rating_reg,
+                                              mytext_criterion, myrating_criterion, ntokens, tgt_len)
 
     # Run on test data.
     test_losses = test(test_dataloader, mymodel, peter_loss, mydevice)
     c_loss, t_loss, r_loss, loss = test_losses
     peter_logger.info('=' * 89)
-    peter_logger.info(f"{now_time()}{peter_content(c_loss, t_loss, r_loss)} on test")
+    peter_logger.info(f"{now_time()}{content(c_loss, t_loss, r_loss)} on test")
 
     prediction_path = os.path.join(path, args.outf)
 
@@ -239,7 +231,7 @@ if __name__ == "__main__":
     ratings = [content[2] for content in test_data]
     sequences = [content[3] for content in test_data]
 
-    text_o = generate(test_dataloader, mymodel, mydevice, args.words, myword2idx, myidx2word,
+    text_o = generate(mydata, test_dataloader, mymodel, mydevice, args.words, myword2idx, myidx2word,
                       mydata.max_rating, mydata.min_rating, ratings, sequences)
     
     # real,

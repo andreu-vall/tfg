@@ -10,9 +10,8 @@ from torch import nn
 from torch.utils.data import Subset, DataLoader
 
 from models.peter import PETER
-from utils.peter import now_time # DataLoader, Batchify, 
-from utils.data import MyDataset, MySplitDataset
-from utils.andreu import move_content_to_device, peter_content, peter_loss_good, setup_logger
+from utils.peter import now_time, content, loss
+from utils.data import MyDataset, MySplitDataset, setup_logger, move_to_device
 from test import test
 
 
@@ -29,18 +28,17 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_i
 
     num_batches = len(dataloader)
     
-    for batch, content in enumerate(dataloader):
-
-        content = move_content_to_device(content, device) # Aquí ja té sentit fer-ho
-        # Pel train crec que es neccessita tot transposat?
-
-        user, item, rating, seq = content # (batch_size, seq_len), batch += 1 (comentari ràndom PETER)
+    for batch, real in enumerate(dataloader):
+        
+        real = move_to_device(real, device, transpose_seq=True) # En el traning ho transposaven
+        user, item, rating, seq = real
         batch_size = user.size(0)
  
         text = seq[:-1]  # (src_len + tgt_len - 2, batch_size)
 
-        pred = model(user, item, text)
-        batch_losses = loss_fn(pred, content)
+        predicted = model(user, item, text) # no s'usa el rating pel train
+        batch_losses = loss_fn(predicted, real) # però sí quan es calcula la pèrdua
+
         c_loss, r_loss, t_loss, loss = batch_losses
 
         loss.backward()
@@ -64,7 +62,7 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_i
             context_loss, text_loss, rating_loss, real_loss = interval_average_losses
 
             peter_logger.info(
-                f"{now_time()}{peter_content(context_loss, text_loss, rating_loss)} | "
+                f"{now_time()}{content(context_loss, text_loss, rating_loss)} | "
                 f"{(batch+1):5d}/{num_batches:5d} batches")
             
             interval_losses = torch.zeros(4)
@@ -81,7 +79,7 @@ def peter_validation_msg(val_losses, rating_reg):
     if rating_reg != 0: # what even is rating_reg?
         printed_loss += r_loss
     # Crec que aquí explota i no pinta res l'exponencial???
-    return f"{now_time()}{peter_content(c_loss, t_loss, r_loss)} | valid loss {printed_loss:4.4f} on validation"
+    return f"{now_time()}{content(c_loss, t_loss, r_loss)} | valid loss {printed_loss:4.4f} on validation"
 
 
 def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader, epochs, endure_times, log_interval, \
@@ -258,19 +256,16 @@ if __name__ == "__main__":
 
     # Això ho canviaré totalment
 
-    data = MyDataset(args.data_path, args.words, args.vocab_size) # tarda uns 5 segons
+    data = MyDataset.load_or_create(args.data_path, args.words, args.vocab_size)
     mysplitdata = MySplitDataset(args.data_path, len(data), args.index_dir, True)
 
-    def collate_fn(batch):
-        return [torch.tensor(x) for x in zip(*batch)]
-
     train_data = Subset(data, mysplitdata.train)
-    train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+    train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
 
     val_data = Subset(data, mysplitdata.valid)
-    val_dataloader = DataLoader(val_data, batch_size=args.batch_size, collate_fn=collate_fn)
+    val_dataloader = DataLoader(val_data, batch_size=args.batch_size)
 
-    pad_idx = data.word_dict.word2idx['<pad>']
+    pad_idx = data.pad
 
     # train_dataloader = Batchify(corpus.train, word2idx, args.words, args.batch_size, shuffle=True, seed=args.seed) # he afegit seed
     # val_dataloader = Batchify(corpus.valid, word2idx, args.words, args.batch_size)
@@ -307,12 +302,13 @@ if __name__ == "__main__":
     ###############################################################################
 
     # variables de args: context_reg, text_reg, rating_red
-    # peter_loss = lambda pred, content: peter_loss_good(pred, content, args.context_reg, args.text_reg, args.rating_reg,
-    #                                                 mytext_criterion, myrating_criterion, ntokens, tgt_len)
-    # Sense una lambda és millor d'editar coses?
-    def peter_loss(pred, content):
-        return peter_loss_good(pred, content, args.context_reg, args.text_reg, args.rating_reg, 
-                               mytext_criterion, myrating_criterion, ntokens, tgt_len)
+    peter_loss = lambda predicted, real: loss(predicted, real, args.context_reg, args.text_reg, args.rating_reg,
+                                              mytext_criterion, myrating_criterion, ntokens, tgt_len)
+    
+    # # Per si necessito fer prints a mitges only
+    # def peter_loss(predicted, real):
+    #     return loss(predicted, real, args.context_reg, args.text_reg, args.rating_reg, 
+    #                 mytext_criterion, myrating_criterion, ntokens, tgt_len)
     
 
     # Aquests són els paràmetres que usava PETER, no els he provat a canviar yet

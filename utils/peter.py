@@ -1,9 +1,10 @@
 import math
-import heapq
 import datetime
 
 from .rouge import rouge
 from .bleu import compute_bleu
+
+# https://github.com/lileipisces/PETER/blob/master/utils.py
 
 
 def rouge_score(references, generated):
@@ -54,48 +55,6 @@ def unique_sentence_percent(sequence_batch):
     return len(unique_seq) / len(sequence_batch), len(unique_seq)
 
 
-def feature_detect(seq_batch, feature_set):
-    feature_batch = []
-    for ids in seq_batch:
-        feature_list = []
-        for i in ids:
-            if i in feature_set:
-                feature_list.append(i)
-        feature_batch.append(set(feature_list))
-
-    return feature_batch
-
-
-def feature_matching_ratio(feature_batch, test_feature):
-    count = 0
-    for (fea_set, fea) in zip(feature_batch, test_feature):
-        if fea in fea_set:
-            count += 1
-
-    return count / len(feature_batch)
-
-
-def feature_coverage_ratio(feature_batch, feature_set):
-    features = set()
-    for fb in feature_batch:
-        features = features | fb
-
-    return len(features) / len(feature_set)
-
-
-def feature_diversity(feature_batch):
-    list_len = len(feature_batch)
-
-    total_count = 0
-    for i, x in enumerate(feature_batch):
-        for j in range(i + 1, list_len):
-            y = feature_batch[j]
-            total_count += len(x & y)
-
-    denominator = list_len * (list_len - 1) / 2
-    return total_count / denominator
-
-
 def mean_absolute_error(predicted, max_r, min_r, mae=True):
     total = 0
     for (r, p) in predicted:
@@ -118,71 +77,31 @@ def root_mean_square_error(predicted, max_r, min_r):
     return math.sqrt(mse)
 
 
-class WordDictionary:
-    def __init__(self):
-        self.idx2word = ['<bos>', '<eos>', '<pad>', '<unk>']
-        self.__predefine_num = len(self.idx2word)
-        self.word2idx = {w: i for i, w in enumerate(self.idx2word)}
-        self.__word2count = {}
-
-    # naive space splitting
-    def add_sentence(self, sentence):
-        for w in sentence.split():
-            self.add_word(w)
-
-    def add_word(self, w):
-        if w not in self.word2idx:
-            self.word2idx[w] = len(self.idx2word)
-            self.idx2word.append(w)
-            self.__word2count[w] = 1
-        else:
-            self.__word2count[w] += 1
-
-    def __len__(self):
-        return len(self.idx2word)
-
-    def keep_most_frequent(self, max_vocab_size=20_000):
-        if len(self.__word2count) > max_vocab_size:
-            frequent_words = heapq.nlargest(max_vocab_size, self.__word2count, key=self.__word2count.get)
-            self.idx2word = self.idx2word[:self.__predefine_num] + frequent_words
-            self.word2idx = {w: i for i, w in enumerate(self.idx2word)}
-
-
-class EntityDictionary:
-    def __init__(self):
-        self.idx2entity = []
-        self.entity2idx = {}
-
-    def add_entity(self, e):
-        if e not in self.entity2idx:
-            self.entity2idx[e] = len(self.idx2entity)
-            self.idx2entity.append(e)
-
-    def __len__(self):
-        return len(self.idx2entity)
-
-
-
-def sentence_format(sentence, max_len, pad, bos, eos):
-    length = len(sentence)
-    if length >= max_len:
-        return [bos] + sentence[:max_len] + [eos]
-    else:
-        return [bos] + sentence + [eos] + [pad] * (max_len - length)
-
-
 def now_time():
     return '[' + datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f') + ']: '
 
 
-# A partir del <eos> ja no es torna res més. Si es fes tot en paral·lel sense la list comprehension
-# potser seria més fàcil, però per 15 words potser no val la pena i perdo més temps en passar a pandas
-def ids2tokens(ids, word2idx, idx2word, untrained=False):
-    if not untrained:
-        bos = word2idx['<bos>'] # El model entrenat 0 èpoques en general no em genera ni <bos> ni <eos>!!
-        eos = word2idx['<eos>']
-        assert bos == ids[0] # yikes el model sense entrenar res no genera el <bos>!!
-        eos_index = ids.index(eos) # Si no trobés el <eos> petaria, crec que ja és el que s'espera
-        return [idx2word[i] for i in ids[:eos_index+1]]
+def content(context_loss, text_loss, rating_loss):
+    exp_context_loss = math.exp(context_loss)
+    exp_text_loss = math.exp(text_loss)
+    return f"context ppl {exp_context_loss:4.4f} | text ppl {exp_text_loss:4.4f} | rating loss {rating_loss:4.4f}"
+
+
+
+def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rating_criterion, ntokens, tgt_len):
+
+    # Això és la clau de l'entrenament. Depenen del que si posis loss aprendrà a fer una cosa o altra el model
+
+    user, item, rating, seq = real
+
+    log_word_prob, log_context_dis, rating_p, _ = predicted  # (tgt_len, batch_size, ntoken) vs. (batch_size, ntoken) vs. (batch_size,)
+    context_dis = log_context_dis.unsqueeze(0).repeat((tgt_len - 1, 1, 1))  # (batch_size, ntoken) -> (tgt_len - 1, batch_size, ntoken)
+
     
-    return [idx2word[i] for i in ids]
+    c_loss = text_criterion(context_dis.view(-1, ntokens), seq[1:-1].reshape((-1,))) # This is a bit ugly
+    t_loss = text_criterion(log_word_prob.view(-1, ntokens), seq[1:].reshape((-1,)))
+    r_loss = rating_criterion(rating_p, rating)
+
+    loss = c_loss * context_reg + t_loss * text_reg + r_loss * rating_reg # ordre més normal ara
+
+    return c_loss, t_loss, r_loss, loss

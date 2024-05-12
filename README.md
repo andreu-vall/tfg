@@ -13,6 +13,12 @@ torch
 3. Train a model with a data_path and index_dir, giving it an id
 4. Test this model
 
+1. process.ipynb
+2. split.ipynb
+3. train.py
+4. test.py
+
+
 ## Usage
 ```
 python train.py [data_path] [index_dir] [id]

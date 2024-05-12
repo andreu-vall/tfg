@@ -17,6 +17,7 @@ class PETER(nn.Module):
     def __init__(self, peter_mask, src_len, tgt_len, pad_idx, nuser, nitem, ntoken, emsize, nhead, nhid, nlayers, dropout=0.5):
         super(PETER, self).__init__()
         self.pos_encoder = PositionalEncoding(emsize, dropout)  # emsize: word embedding size
+        # why am I only using 2 heads?
         encoder_layers = TransformerEncoderLayer(emsize, nhead, nhid, dropout)  # nhid: dim_feedforward, one basic layer, including multi-head attention and FFN
         self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)  # loop over the one above
         self.user_embeddings = nn.Embedding(nuser, emsize)
