@@ -256,7 +256,7 @@ if __name__ == "__main__":
 
     # Això ho canviaré totalment
 
-    data = MyDataset.load_or_create(args.data_path, args.words, args.vocab_size)
+    data = MyDataset.load_or_create_and_save(args.data_path, args.words, args.vocab_size)
     mysplitdata = MySplitDataset(args.data_path, len(data), args.index_dir, True)
 
     train_data = Subset(data, mysplitdata.train)

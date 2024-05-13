@@ -7,23 +7,15 @@ python >= 3
 torch
 ```
 
-## Steps
-1. Process data for a certain dataset, from /raw_data (any format) to /data (as a csv)
-2. Generate train/valid/test splits
-3. Train a model with a data_path and index_dir, giving it an id
-4. Test this model
-
-1. process.ipynb
-2. split.ipynb
-3. train.py
-4. test.py
-
 
 ## Usage
-```
-python train.py [data_path] [index_dir] [id]
-python test.py [id]
-```
+
+1. **process.ipynb**: create a dataset with [users, items, ratings, text] from any source and save it in /data
+2. **split.ipynb**: create or load a certain train/test/valid split
+3. **transform.ipynb**: transform all the text into ID's (will be automatically done the first time training it)
+4. **train.py [data_path] [index_dir] [id]**: train a model
+5. **test.py [id]**: test the model
+
 
 ## Sources
 - https://github.com/lileipisces/PETER: repo cloned

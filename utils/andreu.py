@@ -11,17 +11,6 @@ import logging
 from .peter import now_time
 
 
-# Comentaris de l'antic codi:
-# Wait l'Alejandro va començar a usar la REV_COL la review sencera enlloc de predir només el template!
-# Això és molt més pro! Per tant els resultats de l'Alejandro potser tenen més valor dels de PETER,
-# tot i que potser es va complicar una mica introduint tot l'historial. Potser afegir tot l'historial
-# té sentit per coses curtes, com l'historial de notes, maybe inclús l'average que has donat till now,
-# també l'historial de features de les quals has comentat, pq és possible que repeteixis features en
-# nous comentaris, inclús es podria considerar l'historial del item en altres reviews, tot i que fer-ho
-# manualment és una mica de feina i en principi més lleig que si no ho fas. Més senzill per exemple seria
-# l'average till now de notes donades per l'usuari, seria in fact quite useful saber-lo a l'hora de predir
-# la nota per exemple i no serien molts valors si agafessis per exemple les últimes 10 notes
-
 # De fet si consideres que els historial d'alguna mena de columna t'aporta moltes coses i no són coses molt
 # llargues, crec que considerar l'historial probably millori bastant els resultats de qualsevol cosa que facis,
 # tot i que potser el model tardarà més en entrenar. Per exemple:
@@ -46,13 +35,14 @@ from .peter import now_time
 # I si inclús es considerés la diversitat a nivell de batch tmb es podria evitar una mica generar exactament
 # el mateix per a tothom
 
+
 # El Python l'iterator és l'object itself, i només hi pot haver un active iterator. Si vols multiples iterators
 # independents, ho has de fer fent una còpia, però en general no es sol comprovar ni passa.
 # Les propietats són @property
 
 
 # no thing torchtext instal·lat, però si és tant simple ho puc fer jo
-class EntityDictionary:
+class EntityDict:
     def __init__(self):
         self.idx_to_entity = []
         self.entity_to_idx = {}
@@ -74,7 +64,7 @@ class EntityDictionary:
         return sum(self.entity_count.values())
     
 
-class TokenDictionary(EntityDictionary):
+class TokenDictionary(EntityDict):
     def __init__(self, special_tokens):
         super().__init__()
         self.special_tokens = special_tokens
@@ -98,77 +88,62 @@ class TokenDictionary(EntityDictionary):
                 self.add_entity(token)
 
 
+# user, item, rating, text
 class MyDataset(Dataset):
-    # Yikes si trec d'aquí els paràmetres per defecte ho hauria de canviar a tot arreu, a bit of a pain
-    def __init__(self, data_path, text_max_words, vocab_size, user_col='user',
-                 item_col='item', rating_col='rating', text_col='text'):
+    def __init__(self, data_path, text_max_words, vocab_size):
 
+        self.data_path = data_path
         self.text_max_words = text_max_words
-        self.user_col = user_col
-        self.item_col = item_col
-        self.rating_col = rating_col
-        self.text_col = text_col
+        self.vocab_size = vocab_size
 
-        self.user_dict = EntityDictionary()
-        self.item_dict = EntityDictionary()
+        self.user_dict = EntityDict()
+        self.item_dict = EntityDict()
+        special_tokens = "<bos>", "<eos>", "<pad>", "<unk>"
+        self.word_dict = TokenDictionary(special_tokens) # word_dict pq tokenitzo amb espais
+        self.bos, self.eos, self.pad, self.unk = (self.word_dict.entity_to_idx[x] for x in special_tokens)
 
-        bos, eos, pad, unk = "<bos>", "<eos>", "<pad>", "<unk>"
-        self.special_tokens = [bos, eos, pad, unk]
-        self.word_dict = TokenDictionary(self.special_tokens) # word_dict pq tokenitzo amb espais
-        self.bos = self.word_dict.entity_to_idx[bos]
-        self.eos = self.word_dict.entity_to_idx[eos]
-        self.pad = self.word_dict.entity_to_idx[pad]
-        self.unk = self.word_dict.entity_to_idx[unk]
-
-        # 0, he canviat el source. Si no és de la classe no es guardarà millor
-
+        # 0, carregar csv original
         print(f'{now_time()}Loading csv...')
-        original_data = pd.read_csv(data_path + '/reviews.csv') # 0.5 seconds
+        original_data = pd.read_csv(data_path + '/reviews.csv') # No atribut de classe pq no el serialitzi
+        original_data["text"] = original_data["text"].fillna('nan') # some text might be literally "nan" as string
 
-        # Si abans de passar les dades al model SEMPRE les retallaré a una fixed length,
-        # might as well retallar des del principi per no perdre el temps processant text
-        # que no usaré i a més que donaria unes frequent words que no necessàriament són
-        # iguals que les del princpi
+        # 1, tallar tot el text a un determinat nombre de paraules
         print(f'{now_time()}Cutting text')
-        original_data[self.text_col] = original_data[self.text_col].str.split().str[:self.text_max_words].str.join(' ')
+        original_words = original_data["text"].str.split().apply(len).sum()
+        original_data["text"] = original_data["text"].str.split().str[:self.text_max_words].str.join(' ')
+        new_words = original_data["text"].str.split().apply(len).sum()
+        lost_percentage = 100*(original_words - new_words)/original_words
+        print(f"{now_time()}lost {lost_percentage:.2f}% of words")
 
-        # 1, inicialitzar entitats, from 11s to 1s with apply instead of iterrows
+        # 2, inicialitzar entitats
         print(f'{now_time()}Creating entities')
-        original_data[self.user_col].apply(self.user_dict.add_entity)
-        original_data[self.item_col].apply(self.item_dict.add_entity)
-        original_data[self.text_col].apply(self.word_dict.add_sentence)
-        self.max_rating = original_data[self.rating_col].max()
-        self.min_rating = original_data[self.rating_col].min()
+        original_data["user"].apply(self.user_dict.add_entity)
+        original_data["item"].apply(self.item_dict.add_entity)
+        original_data["text"].apply(self.word_dict.add_sentence)
+        self.max_rating = original_data["rating"].max()
+        self.min_rating = original_data["rating"].min()
 
-        print('nº of words:', len(self.word_dict))
-        print('total count:', self.word_dict.total_count)
-
+        # 3, deixar només les paraules més freqüents
+        old_count = self.word_dict.total_count
         print(f'{now_time()}Keeping only most frequent words')
-
-        # 2
         self.word_dict.keep_most_frequent(vocab_size)
+        new_count = self.word_dict.total_count
+        lost_percentage = 100*(old_count - new_count)/old_count
+        print(f"{now_time()}lost {lost_percentage:.2f}% of words")
 
-        print('nº of words:', len(self.word_dict))
-        print('total count:', self.word_dict.total_count)
-
+        # 4, transformar strings a ID's
         print(f'{now_time()}Transforming data')
-
-        # 3, from 11s to 3.5s
         data = original_data.apply(self.transform_review, axis=1)
-
         self.users, self.items, self.ratings, self.texts = map(torch.tensor, zip(*data))
-
         print(f'{now_time()}Data ready')
     
 
     # review -> (user, item, rating, text)
     def transform_review(self, review):
-
-        user = self.user_dict.entity_to_idx[review[self.user_col]]
-        item = self.item_dict.entity_to_idx[review[self.item_col]]
-        rating = float(review[self.rating_col])
-        text = self.tokenize_text(review[self.text_col])
-
+        user = self.user_dict.entity_to_idx[review["user"]]
+        item = self.item_dict.entity_to_idx[review["item"]]
+        rating = float(review["rating"])
+        text = self.tokenize_text(review["text"])
         return user, item, rating, text
 
     # the reverse
@@ -177,8 +152,13 @@ class MyDataset(Dataset):
         item = self.item_dict.idx_to_entity[review[1]]
         rating = review[2].item() # si no posava el item() hi havia un tensor
         text = self.untokenize_text(review[3])
-        return {self.user_col: user, self.item_col: item, self.rating_col: rating, self.text_col: text}
-    
+        return {"user": user, "item": item, "rating": rating, "text": text}
+
+    def __len__(self):
+        return len(self.users)
+
+    def __getitem__(self, idx):
+        return self.users[idx], self.items[idx], self.ratings[idx], self.texts[idx]
 
     def save(self, filename):
         with open(filename, 'wb') as f:
@@ -186,13 +166,11 @@ class MyDataset(Dataset):
 
     @staticmethod
     def load(filename):
-        # UPS si es canvia l'estructura del fitxer i/o atributs peta i ja no es poden
-        # aprofitar els checkpoints, com el que em passava amb el POD
         with open(filename, 'rb') as f:
             return pickle.load(f)
         
     @staticmethod
-    def load_or_create(data_path, text_max_words, vocab_size):
+    def load_or_create_and_save(data_path, text_max_words, vocab_size):
         filename = f'{data_path}/MyDataset_{text_max_words}_{vocab_size}.pkl'
         if os.path.exists(filename):
             print("exists, loading it")
@@ -205,15 +183,16 @@ class MyDataset(Dataset):
             print("saved")
             return dataset
     
-
-    # def untransform_batch(self, batch):
-    #     return [self.untransform_review(items) for items in zip(*batch)]
-    
-    def __len__(self):
-        return len(self.users)
-
-    def __getitem__(self, idx):
-        return self.users[idx], self.items[idx], self.ratings[idx], self.texts[idx]
+    @staticmethod
+    def create_override(data_path, text_max_words, vocab_size):
+        filename = f'{data_path}/MyDataset_{text_max_words}_{vocab_size}.pkl'
+        if os.path.exists(filename):
+            print('will override the previous pkl')
+        dataset = MyDataset(data_path, text_max_words, vocab_size)
+        print("created, saving it")
+        dataset.save(f'{data_path}/MyDataset_{text_max_words}_{vocab_size}.pkl')
+        print("saved")
+        return dataset
     
     def tokenize_text(self, text): # Naive white space tokenizer
         text_tokens = [self.word_dict.entity_to_idx.get(w, self.unk) for w in text.split()]
@@ -236,7 +215,7 @@ class MyDataset(Dataset):
                 assert(False)
             return ' '.join(self.word_dict.idx_to_entity[idx] for idx in tokenized_text[1:eos_idx])
         
-        #print('WARNING: untokenizing text without checking <bos> and <eos>')
+        print('WARNING: untokenizing text without checking <bos> and <eos>')
         return ' '.join([self.word_dict.idx_to_entity[idx] for idx in tokenized_text])
 
 

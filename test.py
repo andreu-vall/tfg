@@ -196,7 +196,7 @@ if __name__ == "__main__":
         mymodel = torch.load(f).to(mydevice) # Simplement he carregat el meu model enlloc del seu
 
 
-    mydata = MyDataset.load_or_create(args.data_path, args.words, args.vocab_size)
+    mydata = MyDataset.load_or_create_and_save(args.data_path, args.words, args.vocab_size)
     mysplitdata = MySplitDataset(args.data_path, len(mydata), args.index_dir, True)
 
     test_data = Subset(mydata, mysplitdata.test)

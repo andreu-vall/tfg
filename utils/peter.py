@@ -88,9 +88,8 @@ def content(context_loss, text_loss, rating_loss):
 
 
 
+# Això és la clau de l'entrenament. Depenen del que si posis loss aprendrà a fer una cosa o altra el model
 def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rating_criterion, ntokens, tgt_len):
-
-    # Això és la clau de l'entrenament. Depenen del que si posis loss aprendrà a fer una cosa o altra el model
 
     user, item, rating, seq = real
 
