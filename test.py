@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, Subset
 
 from utils.peter import now_time, content, loss
 
-from utils.andreu import MyDataset, MySplitDataset, setup_logger, move_to_device
+from data import MyDataset, MySplitDataset, setup_logger, move_to_device
 
 
 def test(dataloader: DataLoader, model, loss_fn, device):

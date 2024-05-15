@@ -135,7 +135,7 @@ import torch
 import tqdm
 
 from utils.peter import now_time
-from utils.andreu import MyDataset, MySplitDataset, setup_logger
+from data import MyDataset, MySplitDataset, setup_logger
 # , now_time és un import que es fa a través de utils.peter i funciona??
 
 
@@ -168,8 +168,8 @@ def parse_arguments():
     return args
 
 
-from utils.andreu import move_to_device
-from models.peter import PETER
+from data import move_to_device
+from peter_model import PETER
 
 
 def generate(data : MyDataset, dataloader, model : PETER, device, strategy):

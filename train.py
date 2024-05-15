@@ -10,9 +10,9 @@ import argparse
 from torch import nn
 from torch.utils.data import Subset, DataLoader
 
-from models.peter import PETER
+from peter_model import PETER
 from utils.peter import now_time, content, loss
-from utils.andreu import MyDataset, MySplitDataset, setup_logger, move_to_device
+from data import MyDataset, MySplitDataset, setup_logger, move_to_device
 from test import test
 
 

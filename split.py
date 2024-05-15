@@ -1,4 +1,4 @@
-from utils.andreu import MySplitDataset
+from data import MySplitDataset
 import pandas as pd
 import argparse
 
