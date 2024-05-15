@@ -1,6 +1,5 @@
 import sys
 import os
-import datetime
 import logging
 import json
 import tqdm
@@ -168,11 +167,9 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
         andreu_logger.info(now_time() + 'Not saving the final model to disk')
 
 
-# YAY ja no uso variables globals enlloc
-if __name__ == "__main__":
 
-    start = datetime.datetime.now()
-    
+def parse_arguments():
+
     # Potser hauria de separar més entre hiperparàmetres del model i hiperparàmetres de l'entrenament
     parser = argparse.ArgumentParser()
 
@@ -238,7 +235,14 @@ if __name__ == "__main__":
     # i executant entrenaments ràndom només per provar si funciona o no el meu codi, sense cap objectiu
     parser.add_argument('--no_save', action='store_true', help='do not save the final model')
 
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+
+# YAY ja no uso variables globals enlloc
+if __name__ == "__main__":
+    
+    args = parse_arguments()
 
     mypath = os.path.join('out', args.train_id)
     if os.path.exists(mypath):
@@ -247,6 +251,7 @@ if __name__ == "__main__":
 
     mylogs = os.path.join(mypath, 'logs')
     os.makedirs(mylogs)
+
     # si em va imprimint coses per pantalla kinda trenca el tqdm (en el sentit que n'ha de fer un altre)
     peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log') # potser per pantalla de moment puc posar els 2
     andreu_logger = setup_logger('andreu_logger', f'{mylogs}/andreu.log', True)
@@ -274,13 +279,12 @@ if __name__ == "__main__":
 
     mymodel_path = os.path.join(mypath, 'model.pt')
 
+
     ###############################################################################
     # Load data
     ###############################################################################
 
     peter_logger.info(now_time() + 'Loading data')
-
-    # Això ho canviaré totalment
 
     data = MyDataset(args.data_path, args.tokenizer, args.context_window) #, args.text_vocab_size)
 
@@ -292,8 +296,6 @@ if __name__ == "__main__":
     val_data = Subset(data, mysplitdata.valid)
     val_dataloader = DataLoader(val_data, batch_size=args.batch_size)
 
-    # train_dataloader = Batchify(corpus.train, word2idx, args.words, args.batch_size, shuffle=True, seed=args.seed) # he afegit seed
-    # val_dataloader = Batchify(corpus.valid, word2idx, args.words, args.batch_size)
 
     ###############################################################################
     # Build the model
@@ -314,6 +316,9 @@ if __name__ == "__main__":
                     data.token_dict.bos,  data.token_dict.eos,  data.token_dict.pad, data.token_dict.unk).to(mydevice)
 
     else:
+        # No sé si seria possible del tot carregar un model de un altre. 
+        # Passar els embeddings de text d'un a un altre tindria sentit.
+        # Però si canvies tots els usuaris i items seria més complicar fer transfer learning
         assert(False)
         andreu_logger.info(now_time() + 'Loading model')
         with open(args.source_checkpoint, 'rb') as f:

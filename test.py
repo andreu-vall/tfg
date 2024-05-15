@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import json
 import sys
-import tqdm
 
 from torch.utils.data import DataLoader, Subset
 
@@ -60,16 +59,8 @@ def test(dataloader: DataLoader, model, loss_fn, device):
     return (total_losses / len(dataloader.dataset)).tolist()
 
 
-
-
-# Encara he de netejar una mica això del main que ho tinc realment molt lleig
-# primer cop que utilitzo voluntàriament pq el necessito el name main xD
-if __name__ == "__main__":
-
-    # This could be cleaned up a bit
-    # El meu modus operandis és agafar un codi que funciona i executar-lo jo i anar-lo editant per entendre'l
-
-    # Parse command line arguments. Primer hem de fet aquest pq és el que dona la id
+# Combinar els arguments amb els de train, pq hi ha moltes coses que es necessitaven de train
+def parse_arguments():
     cmd_parser = argparse.ArgumentParser()
     cmd_parser.add_argument('train_id', type=str)
     cmd_parser.add_argument('--cpu', action='store_true', help='don\'t use CUDA') # hauria de comprovar si es pot canviar
@@ -80,19 +71,26 @@ if __name__ == "__main__":
     path = os.path.join('out', cmd_args.train_id)
     if not os.path.exists(path):
         raise ValueError('This id doesn\'t exist!')
-    
-
-    mylogs = os.path.join(path, 'logs')
-    peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log')
-    history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
-
-    history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
 
     with open(f'out/{cmd_args.train_id}/train.json', 'r') as f:
         train_args = json.load(f)
 
     merged_args = {**train_args, **vars(cmd_args)} # el segon diccionari sobreescriu el primer segons Copilot
     args = argparse.Namespace(**merged_args)
+
+    return args
+
+
+if __name__ == "__main__":
+
+    args = parse_arguments()
+
+    path = os.path.join('out', args.train_id)
+
+    mylogs = os.path.join(path, 'logs')
+    peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log')
+    history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
+    history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
 
     if torch.cuda.is_available():
         if args.cpu:
