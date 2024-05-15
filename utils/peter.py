@@ -7,6 +7,10 @@ from .bleu import compute_bleu
 # https://github.com/lileipisces/PETER/blob/master/utils.py
 
 
+# I think I will completely delete this whole file as it quite useless
+# Or at least delete a lot of things from here
+
+
 def rouge_score(references, generated):
     """both are a list of strings"""
     score = rouge(generated, references)
@@ -87,18 +91,34 @@ def content(context_loss, text_loss, rating_loss):
     return f"context ppl {exp_context_loss:4.4f} | text ppl {exp_text_loss:4.4f} | rating loss {rating_loss:4.4f}"
 
 
-
+# Encara estic intenant veure d'on ve el context...
 # Això és la clau de l'entrenament. Depenen del que si posis loss aprendrà a fer una cosa o altra el model
 def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rating_criterion, ntokens, tgt_len):
 
-    user, item, rating, seq = real
+    # Aquesta és la loss function que utiliza SEMPRE el model per entrenar i fer el test inclús
+    
 
-    log_word_prob, log_context_dis, rating_p, _ = predicted  # (tgt_len, batch_size, ntoken) vs. (batch_size, ntoken) vs. (batch_size,)
+    user, item, rating, text = real
+
+    log_word_prob, log_context_dis, rating, attns = predicted
+
+    #log_word_prob, log_context_dis, rating_p, _ = predicted  # (tgt_len, batch_size, ntoken) vs. (batch_size, ntoken) vs. (batch_size,)
     context_dis = log_context_dis.unsqueeze(0).repeat((tgt_len - 1, 1, 1))  # (batch_size, ntoken) -> (tgt_len - 1, batch_size, ntoken)
 
+    # el context es compara amb text[1:-1] directament, i què vindria a ser?
+
+    # El text és tot el text
+    # i li va treient coses del principi i del final. El primer potser és el start token, el del final el
+    # que estàs intentant predir en el text i per tant és millor no utilitzar-lo???
+    # I'm still not fully sure about this
+
+    print('text shape is', text.shape)
+    print('text is', text)
+    assert(False)
+
     
-    c_loss = text_criterion(context_dis.view(-1, ntokens), seq[1:-1].reshape((-1,))) # This is a bit ugly
-    t_loss = text_criterion(log_word_prob.view(-1, ntokens), seq[1:].reshape((-1,)))
+    c_loss = text_criterion(context_dis.view(-1, ntokens), text[1:-1].reshape((-1,))) # This is a bit ugly
+    t_loss = text_criterion(log_word_prob.view(-1, ntokens), text[1:].reshape((-1,)))
     r_loss = rating_criterion(rating_p, rating)
 
     loss = c_loss * context_reg + t_loss * text_reg + r_loss * rating_reg # ordre més normal ara

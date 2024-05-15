@@ -1,5 +1,6 @@
 """
-Borrowed from https://github.com/tensorflow/nmt/blob/master/nmt/scripts/rouge.py
+PETER: Borrowed from https://github.com/tensorflow/nmt/blob/master/nmt/scripts/rouge.py
+Andreu: I have checked it and it's exactly the same
 
 ROUGE metric implementation.
 

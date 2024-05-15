@@ -1,5 +1,6 @@
 """
-Borrowed from https://github.com/tensorflow/nmt/blob/master/nmt/scripts/bleu.py
+PETER: borrowed from https://github.com/tensorflow/nmt/blob/master/nmt/scripts/bleu.py
+Andreu: I have checked and it's exactly the same, only deleting the license comment
 
 Python implementation of BLEU and smooth-BLEU.
 

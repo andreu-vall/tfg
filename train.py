@@ -3,6 +3,7 @@ import os
 import datetime
 import logging
 import json
+import tqdm
 
 import torch
 import argparse
@@ -15,8 +16,9 @@ from utils.andreu import MyDataset, MySplitDataset, setup_logger, move_to_device
 from test import test
 
 
+# és més pro posar una progress bar de tqdm per cada època
 # i put one hint only, in general it's better to hint all the types
-def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_interval, clip):
+def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_interval, clip, epoch):
 
     peter_logger = logging.getLogger("peter_logger")
     andreu_logger = logging.getLogger("andreu_logger") # Falta acabar de definir les coses que vull fer log jo
@@ -28,13 +30,25 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_i
 
     num_batches = len(dataloader)
     
-    for batch, real in enumerate(dataloader):
+    for batch, real in enumerate(tqdm.tqdm(dataloader, position=1, mininterval=1, desc=f"Epoch {epoch} progress")):
         
-        real = move_to_device(real, device, transpose_seq=True) # En el traning ho transposaven
-        user, item, rating, seq = real
+        real = move_to_device(real, device, transpose_text=True) # En el traning ho transposaven
+        user, item, rating, text = real
         batch_size = user.size(0)
+
+        print('before treure la última posicio, text shape is', text.shape)
  
-        text = seq[:-1]  # (src_len + tgt_len - 2, batch_size)
+        text = text[:-1]  # (src_len + tgt_len - 2, batch_size)
+
+        # Es treu l'últim token de cada text de cada usuari
+
+        # pq es treu la última posició de text???? Només s'intenta predir l'últim token en el train?
+        # És com si li passessin tot el text sencer, es treu NOMÉS l'últim token i s'intenta predir
+        # l'últim token sense donar-li òbviament al model i tenint tots els anteriors ja donats
+
+        # crec que és com si treguessis l'últim token i llavors l'intentes predir?
+        print('here the text thing is', text.shape)
+        print(text)
 
         predicted = model(user, item, text) # no s'usa el rating pel train
         batch_losses = loss_fn(predicted, real) # però sí quan es calcula la pèrdua
@@ -88,10 +102,13 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
     peter_logger = logging.getLogger("peter_logger")
     andreu_logger = logging.getLogger("andreu_logger")
 
-    andreu_logger.info(now_time() + 'epoch 0')
+    #andreu_logger.info(now_time() + 'epoch 0')
+    print("it's computing the loss for the validation set")
+    print("li estic passant la loss_fn del model")
     val_losses = test(val_dataloader, model, loss_fn, device)
+    print("it finished computing the loss for the validation set")
     real_loss = val_losses[3]  # real_loss for the Gradient Descent
-    andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4
+    #andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4
 
     if epochs == 0:
         andreu_logger.info(now_time() + 'No epochs to train')
@@ -99,20 +116,20 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
     else:
         best_val_loss = real_loss
         endure_count = 0
-        andreu_logger.info(now_time() + 'Start training')
-    
-    for epoch in range(1, epochs + 1):
+        #andreu_logger.info(now_time() + 'Start training') # té problemes amb el tqdm tot el que posi al mateix temps per pantalla
+
+    # mininterval so it's a bit less distracting when updating
+    for epoch in tqdm.tqdm(range(1, epochs + 1), total=epochs, position=0, desc="Training progress"):
 
         peter_logger.info(f"{now_time()}epoch {epoch}")
-        andreu_logger.info(f"{now_time()}epoch {epoch}")
 
-        train_losses = train_epoch(train_dataloader, model, loss_fn, optimizer, device, log_interval, args.clip)
-        andreu_logger.info(f"{now_time()}real_loss on training: {train_losses[3]}") # real_loss:4.4f
+        train_losses = train_epoch(train_dataloader, model, loss_fn, optimizer, device, log_interval, args.clip, epoch)
+        #andreu_logger.info(f"{now_time()}real_loss on training: {train_losses[3]}") # real_loss:4.4f
 
         val_losses = test(val_dataloader, model, loss_fn, device)
         real_loss = val_losses[3]  # real_loss for the Gradient Descent
 
-        andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4f
+        #andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4f
         peter_logger.info(peter_validation_msg(val_losses, rating_reg))
 
         # Save the model ONLY if the validation loss is the best we've seen so far.
@@ -151,6 +168,7 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
         andreu_logger.info(now_time() + 'Not saving the final model to disk')
 
 
+# data_path {bert} text_fixed_tokens text_vocab_size index_dir id
 
 
 # YAY ja no uso variables globals enlloc
@@ -164,11 +182,19 @@ if __name__ == "__main__":
     # Paràmetres obligatoris (sense el -- ja es posa sol required=True)
     # Crec que hauria de canviar l'ordre dels arguments pq normalment només modifico la id
     parser.add_argument('data_path', type=str, help='path for loading the pickle data')
+    parser.add_argument('tokenizer', choices=['bert-base-uncased'], help='tokenizer to use')
+    parser.add_argument('text_fixed_tokens', type=int, help='number of tokens to use for each review')
+
+    # should be optative this
+    parser.add_argument('--text_vocab_size', type=int, help='number of tokens to keep in the text vocabulary')
+
     parser.add_argument('index_dir', type=str, help='load indexes')
     parser.add_argument('id', type=str, help='model id')
 
     # També hi ha l'atribut útil choices per restringir els valors
     # Seria batant ideal organitzar millor els paràmetres
+
+    # he de treure arguments, que la hint és massa llarga...
 
     # Paràmetres del model
     parser.add_argument('--emsize', type=int, default=512, help='size of embeddings')
@@ -193,7 +219,6 @@ if __name__ == "__main__":
     # Els embeddings de words es podrien somehow reutilitzar, però els embeddings dels users i items és més complicat
     parser.add_argument('--source_checkpoint', type=str, default=None, help='directory to load the model')
 
-    parser.add_argument('--vocab_size', type=int, default=20000, help='keep the most frequent words in the dict')
     parser.add_argument('--endure_times', type=int, default=5, help='the maximum endure times of loss increasing on validation')
 
     # Serveixen per definir l'objectiu a minimitzar
@@ -207,7 +232,7 @@ if __name__ == "__main__":
     #parser.add_argument('--peter_mask', action='store_true', help='True to use peter mask; Otherwise left-to-right mask')
     parser.add_argument('--left_to_right_mask', action='store_true', help='True to use left-to-right mask; Otherwise peter mask')
 
-    parser.add_argument('--words', type=int, default=15, help='number of words to generate for each sample')
+    
 
     # En general crec que m'interessa guardar el model final. Si no el entrenament és totally pointless.
     # L'únic cas quan no m'interessaria és en debugging stage quan estic provant si el meu codi funciona
@@ -223,7 +248,8 @@ if __name__ == "__main__":
 
     mylogs = os.path.join(mypath, 'logs')
     os.makedirs(mylogs)
-    peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log', True) # potser per pantalla de moment puc posar els 2
+    # si em va imprimint coses per pantalla kinda trenca el tqdm (en el sentit que n'ha de fer un altre)
+    peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log') # potser per pantalla de moment puc posar els 2
     andreu_logger = setup_logger('andreu_logger', f'{mylogs}/andreu.log', True)
 
     history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
@@ -234,6 +260,7 @@ if __name__ == "__main__":
     with open(f'out/{args.id}/train.json', 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
+    # Això no ho vull veure per pantalla cada cop que executo jo... Només ho posaré en el fitxer i ja
     peter_logger.info('-' * 40 + 'ARGUMENTS' + '-' * 40)
     for arg in vars(args):
         peter_logger.info('{:40} {}'.format(arg, getattr(args, arg)))
@@ -256,7 +283,8 @@ if __name__ == "__main__":
 
     # Això ho canviaré totalment
 
-    data = MyDataset.load_or_create_and_save(args.data_path, args.words, args.vocab_size)
+    data = MyDataset(args.data_path, args.tokenizer, args.text_fixed_tokens) #, args.text_vocab_size)
+
     mysplitdata = MySplitDataset(args.data_path, len(data), args.index_dir, True)
 
     train_data = Subset(data, mysplitdata.train)
@@ -264,8 +292,6 @@ if __name__ == "__main__":
 
     val_data = Subset(data, mysplitdata.valid)
     val_dataloader = DataLoader(val_data, batch_size=args.batch_size)
-
-    pad_idx = data.pad
 
     # train_dataloader = Batchify(corpus.train, word2idx, args.words, args.batch_size, shuffle=True, seed=args.seed) # he afegit seed
     # val_dataloader = Batchify(corpus.valid, word2idx, args.words, args.batch_size)
@@ -279,13 +305,14 @@ if __name__ == "__main__":
         
         src_len = 2  # [u, i]
 
-        tgt_len = args.words + 1  # added <bos> or <eos>
-        ntokens = len(data.word_dict)
+        tgt_len = args.text_fixed_tokens + 1  # added <bos> or <eos>
+        ntokens = len(data.token_dict)
         nuser = len(data.user_dict)
         nitem = len(data.item_dict)
         # here i use by default the PETER mask so that i don't have to call it with --peter_mask always
-        mymodel = PETER(not args.left_to_right_mask, src_len, tgt_len, pad_idx, nuser, nitem, ntokens,
-                    args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(mydevice)
+        mymodel = PETER(not args.left_to_right_mask, src_len, tgt_len, nuser, nitem, ntokens,
+                    args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout,
+                    data.token_dict.bos,  data.token_dict.eos,  data.token_dict.pad, data.token_dict.unk).to(mydevice)
 
     else:
         assert(False)
@@ -293,7 +320,7 @@ if __name__ == "__main__":
         with open(args.source_checkpoint, 'rb') as f:
             mymodel = torch.load(f).to(mydevice)
 
-    mytext_criterion = nn.NLLLoss(ignore_index=pad_idx)  # ignore the padding when computing loss
+    mytext_criterion = nn.NLLLoss(ignore_index=data.token_dict.pad)  # ignore the padding when computing loss
     myrating_criterion = nn.MSELoss()
 
 
@@ -302,13 +329,14 @@ if __name__ == "__main__":
     ###############################################################################
 
     # variables de args: context_reg, text_reg, rating_red
-    peter_loss = lambda predicted, real: loss(predicted, real, args.context_reg, args.text_reg, args.rating_reg,
-                                              mytext_criterion, myrating_criterion, ntokens, tgt_len)
     
-    # # Per si necessito fer prints a mitges only
-    # def peter_loss(predicted, real):
-    #     return loss(predicted, real, args.context_reg, args.text_reg, args.rating_reg, 
-    #                 mytext_criterion, myrating_criterion, ntokens, tgt_len)
+    # peter_loss = lambda predicted, real: loss(predicted, real, args.context_reg, args.text_reg, args.rating_reg,
+    #                                           mytext_criterion, myrating_criterion, ntokens, tgt_len)
+    
+    # # Per si necessito fer prints a mitges only. Només posa els arguments de args
+    def peter_loss(predicted, real):
+        return loss(predicted, real, args.context_reg, args.text_reg, args.rating_reg, 
+                    mytext_criterion, myrating_criterion, ntokens, tgt_len)
     
 
     # Aquests són els paràmetres que usava PETER, no els he provat a canviar yet
