@@ -179,10 +179,12 @@ def generate(data : MyDataset, dataloader, model : PETER, device, strategy):
 
         user, item, rating, text = move_to_device(batch, device, transpose_text=False)
 
+        # sembla que tarda uns 2 min a generar text amb context_window = 15 amb greedy pel test
+
         # it's predicted using: user & item only (not using the real rating, the real text or the real context)
         # Ara mateix és només per una batch
         assert strategy == 'greedy', 'Only greedy strategy is implemented'
-        predicted = model.generate(data.text_fixed_tokens, num_beams=1, do_sample=False, user=user, item=item, device=device)
+        predicted = model.generate(data.context_window, num_beams=1, do_sample=False, user=user, item=item, device=device)
         predicted_rating, predicted_context, predicted_text = predicted
 
         # Coses reals
@@ -192,7 +194,11 @@ def generate(data : MyDataset, dataloader, model : PETER, device, strategy):
         # estava mirant com es creava el context per comparar-ho amb el real
 
         decoded_predicted_context = [data.text_unvectorize(c, raw=True) for c in predicted_context]
-        decoded_predicted_text = [data.text_unvectorize(list(t)) for t in predicted_text] # needs a list to call the .index
+
+        # sembla q tmb cal raw pq sinó peta? he entrenat ara 3 èpoques
+        # Els <bos> sí que els posa, però el <eos> sembla que de moment no el posa sovint. De fet el <bos> potser el posa el model en sí
+        # Potser predir l'últim token és estúpid, pq és either <eos> o <pad>, igual que el primer que és sempre <bos>
+        decoded_predicted_text = [data.text_unvectorize(list(t), raw=True) for t in predicted_text] # needs a list to call the .index
 
         batch_results = [{'user': decoded_user[i],
              'item': decoded_item[i],
@@ -228,8 +234,8 @@ if __name__ == "__main__":
     with open(model_path, 'rb') as f:
         mymodel = torch.load(f).to(mydevice)
 
-    mydata = MyDataset(args.data_path, args.tokenizer, args.text_fixed_tokens)
-    mysplitdata = MySplitDataset(args.data_path, len(mydata), args.index_dir, True)
+    mydata = MyDataset(args.data_path, args.tokenizer, args.context_window)
+    mysplitdata = MySplitDataset(args.data_path, len(mydata), args.split_id, True)
 
     test_data = Subset(mydata, mysplitdata.test)
     # té sentit fer el shuffle en el test???

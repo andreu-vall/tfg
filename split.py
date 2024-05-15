@@ -13,7 +13,7 @@ def create_split(data_path, new_index_dir, seed):
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Create a new split for the data.')
     parser.add_argument('data_path', type=str, help='Path to the data')
-    parser.add_argument('split_id', type=int, help='New index directory.')
+    parser.add_argument('split_id', type=str, help='New index directory.')
     parser.add_argument('seed', type=int, help='Seed for random number generator.')
     return parser.parse_args()
 

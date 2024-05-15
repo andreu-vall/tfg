@@ -49,12 +49,13 @@ def load(data_path, tokenizer, override=False):
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Create a new split for the data.')
     parser.add_argument('data_path', type=str, help='Path to the data')
-    parser.add_argument('tokenizer', choices=['bert'], help='Tokenizer to use')
+    parser.add_argument('tokenizer', choices=['bert-base-uncased'], help='Tokenizer to use')
     parser.add_argument('--override', action='store_true', help='Override existing tokenized files')
     return parser.parse_args()
 
 
 # File name tokenize.py was problematic, as some tokenizer library use it. tokenizer.py is fine
+# Can I or should I use the GPU for tokenizing? It's only done 1 time and it doesn't matter really much for my TFG
 if __name__ == "__main__":
     args = parse_arguments()
     load(args.data_path, args.tokenizer, args.override)

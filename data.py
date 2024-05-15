@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, random_split
 import pickle
 import logging
 
-from .utils.peter import now_time
+from utils.peter import now_time
 from tokenizer import load
 
 
@@ -107,12 +107,16 @@ class TokenDict(EntityDict):
         super().keep_most_frequent(vocab_size, self.special_tokens)
 
 
+# maybe I should just call it context_window?
+
 # user, item, rating, text
 class MyDataset(Dataset): # tokenize_text, untokenize_text, 
 
-    def __init__(self, data_path, tokenizer, text_fixed_tokens):
+    # How exactly should I name the variable text_fixed_tokens
 
-        self.text_fixed_tokens = text_fixed_tokens
+    def __init__(self, data_path, tokenizer, context_window):
+
+        self.context_window = context_window
         # self.text_vocab_size = text_vocab_size
 
         # 1, load the users, items, ratings and text dataset
@@ -133,7 +137,7 @@ class MyDataset(Dataset): # tokenize_text, untokenize_text,
         original_data["item"].apply(self.item_dict.add_entity)
 
         special_tokens = ["<bos>", "<eos>", "<pad>", "<unk>"]
-        self.token_dict = TokenDict(special_tokens, self.text_fixed_tokens)
+        self.token_dict = TokenDict(special_tokens, self.context_window)
         original_data["tokenized_text"].apply(self.token_dict.add_sentence)
 
         # here the optative vocab size would be applied
@@ -253,10 +257,10 @@ class MyDataset(Dataset): # tokenize_text, untokenize_text,
 class MySplitDataset:
 
     # could be cleaned up a bit
-    def __init__(self, data_path, data_length, index_dir, load_split=False,
+    def __init__(self, data_path, data_length, split_id, load_split=False,
                  train_ratio=0.8, valid_ratio=0.1, test_ratio=0.1, seed=42):
 
-        self.split_dir = f"{data_path}/splits/{index_dir}"
+        self.split_dir = f"{data_path}/splits/{split_id}"
         self.names = ['train', 'valid', 'test']
 
         if load_split:

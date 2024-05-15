@@ -100,9 +100,9 @@ def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rat
 
     user, item, rating, text = real
 
-    log_word_prob, log_context_dis, rating, attns = predicted
+    #log_word_prob, log_context_dis, rating, attns = predicted
 
-    #log_word_prob, log_context_dis, rating_p, _ = predicted  # (tgt_len, batch_size, ntoken) vs. (batch_size, ntoken) vs. (batch_size,)
+    log_word_prob, log_context_dis, rating_p, _ = predicted  # (tgt_len, batch_size, ntoken) vs. (batch_size, ntoken) vs. (batch_size,)
     context_dis = log_context_dis.unsqueeze(0).repeat((tgt_len - 1, 1, 1))  # (batch_size, ntoken) -> (tgt_len - 1, batch_size, ntoken)
 
     # el context es compara amb text[1:-1] directament, i què vindria a ser?
@@ -112,9 +112,9 @@ def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rat
     # que estàs intentant predir en el text i per tant és millor no utilitzar-lo???
     # I'm still not fully sure about this
 
-    print('text shape is', text.shape)
-    print('text is', text)
-    assert(False)
+    # print('text shape is', text.shape)
+    # print('text is', text)
+    # assert(False)
 
     
     c_loss = text_criterion(context_dis.view(-1, ntokens), text[1:-1].reshape((-1,))) # This is a bit ugly

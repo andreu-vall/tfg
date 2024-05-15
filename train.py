@@ -36,7 +36,7 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_i
         user, item, rating, text = real
         batch_size = user.size(0)
 
-        print('before treure la última posicio, text shape is', text.shape)
+        # print('before treure la última posicio, text shape is', text.shape)
  
         text = text[:-1]  # (src_len + tgt_len - 2, batch_size)
 
@@ -47,8 +47,8 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_i
         # l'últim token sense donar-li òbviament al model i tenint tots els anteriors ja donats
 
         # crec que és com si treguessis l'últim token i llavors l'intentes predir?
-        print('here the text thing is', text.shape)
-        print(text)
+        # print('here the text thing is', text.shape)
+        # print(text)
 
         predicted = model(user, item, text) # no s'usa el rating pel train
         batch_losses = loss_fn(predicted, real) # però sí quan es calcula la pèrdua
@@ -103,10 +103,10 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
     andreu_logger = logging.getLogger("andreu_logger")
 
     #andreu_logger.info(now_time() + 'epoch 0')
-    print("it's computing the loss for the validation set")
-    print("li estic passant la loss_fn del model")
+    # print("it's computing the loss for the validation set")
+    # print("li estic passant la loss_fn del model")
     val_losses = test(val_dataloader, model, loss_fn, device)
-    print("it finished computing the loss for the validation set")
+    # print("it finished computing the loss for the validation set")
     real_loss = val_losses[3]  # real_loss for the Gradient Descent
     #andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4
 
@@ -168,9 +168,6 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
         andreu_logger.info(now_time() + 'Not saving the final model to disk')
 
 
-# data_path {bert} text_fixed_tokens text_vocab_size index_dir id
-
-
 # YAY ja no uso variables globals enlloc
 if __name__ == "__main__":
 
@@ -183,13 +180,15 @@ if __name__ == "__main__":
     # Crec que hauria de canviar l'ordre dels arguments pq normalment només modifico la id
     parser.add_argument('data_path', type=str, help='path for loading the pickle data')
     parser.add_argument('tokenizer', choices=['bert-base-uncased'], help='tokenizer to use')
-    parser.add_argument('text_fixed_tokens', type=int, help='number of tokens to use for each review')
+
+    parser.add_argument('context_window', type=int)
+
+    parser.add_argument('split_id', type=str, help='load indexes')
+    parser.add_argument('train_id', type=str, help='model id')
+
 
     # should be optative this
     parser.add_argument('--text_vocab_size', type=int, help='number of tokens to keep in the text vocabulary')
-
-    parser.add_argument('index_dir', type=str, help='load indexes')
-    parser.add_argument('id', type=str, help='model id')
 
     # També hi ha l'atribut útil choices per restringir els valors
     # Seria batant ideal organitzar millor els paràmetres
@@ -241,7 +240,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    mypath = os.path.join('out', args.id)
+    mypath = os.path.join('out', args.train_id)
     if os.path.exists(mypath):
         raise ValueError('This id already exists!')
     os.makedirs(mypath)
@@ -257,7 +256,7 @@ if __name__ == "__main__":
 
     # Si en un altre lloc ja faig el logs dels arguments i aquest el vull més aviat per carregar-los en el test,
     # potser no tots els arguments són necessaris pel test (n'hi ha que són específics del train)
-    with open(f'out/{args.id}/train.json', 'w') as f:
+    with open(f'out/{args.train_id}/train.json', 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
     # Això no ho vull veure per pantalla cada cop que executo jo... Només ho posaré en el fitxer i ja
@@ -283,9 +282,9 @@ if __name__ == "__main__":
 
     # Això ho canviaré totalment
 
-    data = MyDataset(args.data_path, args.tokenizer, args.text_fixed_tokens) #, args.text_vocab_size)
+    data = MyDataset(args.data_path, args.tokenizer, args.context_window) #, args.text_vocab_size)
 
-    mysplitdata = MySplitDataset(args.data_path, len(data), args.index_dir, True)
+    mysplitdata = MySplitDataset(args.data_path, len(data), args.split_id, True)
 
     train_data = Subset(data, mysplitdata.train)
     train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
@@ -305,7 +304,7 @@ if __name__ == "__main__":
         
         src_len = 2  # [u, i]
 
-        tgt_len = args.text_fixed_tokens + 1  # added <bos> or <eos>
+        tgt_len = args.context_window + 1  # added <bos> or <eos>
         ntokens = len(data.token_dict)
         nuser = len(data.user_dict)
         nitem = len(data.item_dict)
