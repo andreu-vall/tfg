@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, random_split
 import pickle
 import logging
 
-from .peter import now_time
+from .utils.peter import now_time
 from tokenizer import load
 
 

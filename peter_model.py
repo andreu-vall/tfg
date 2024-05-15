@@ -9,7 +9,7 @@ import torch.nn.functional as func
 # from torch.nn import TransformerEncoder
 # en C:\Users\Andreu Vall\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\transformer.py
 
-from .module import PositionalEncoding, TransformerEncoderLayer, TransformerEncoder, MLP, \
+from .utils.module import PositionalEncoding, TransformerEncoderLayer, TransformerEncoder, MLP, \
     generate_peter_mask, generate_square_subsequent_mask
 
 
