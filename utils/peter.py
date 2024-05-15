@@ -91,11 +91,14 @@ def content(context_loss, text_loss, rating_loss):
     return f"context ppl {exp_context_loss:4.4f} | text ppl {exp_text_loss:4.4f} | rating loss {rating_loss:4.4f}"
 
 
+
 # Encara estic intenant veure d'on ve el context...
 # Això és la clau de l'entrenament. Depenen del que si posis loss aprendrà a fer una cosa o altra el model
 def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rating_criterion, ntokens, tgt_len):
 
     # Aquesta és la loss function que utiliza SEMPRE el model per entrenar i fer el test inclús
+
+    # Què vull fer servir jo?
     
 
     user, item, rating, text = real
@@ -124,3 +127,15 @@ def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rat
     loss = c_loss * context_reg + t_loss * text_reg + r_loss * rating_reg # ordre més normal ara
 
     return c_loss, t_loss, r_loss, loss
+
+
+# Això és el que feien en el PETER. Per la validació s'ignora el loss de context (i maybe tmb el de rating)
+# Sembla bastant estrany el que imprimeixen, pq no és pas la loss real en cap lloc
+def peter_validation_msg(val_losses, rating_reg):
+    c_loss, t_loss, r_loss, real_loss = val_losses
+    printed_loss = t_loss
+    if rating_reg != 0: # what even is rating_reg?
+        printed_loss += r_loss
+    # Crec que aquí explota i no pinta res l'exponencial???
+    return f"{now_time()}{content(c_loss, t_loss, r_loss)} | valid loss {printed_loss:4.4f} on validation"
+

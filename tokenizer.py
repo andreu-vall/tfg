@@ -37,6 +37,9 @@ def bert_tokenize(data_path, override=False):
     print("Saving the tokenized text")
     bert_tokenized_text.to_pickle(bert_path) # pickle so that array of strings is kept, csv was a pain to read it
 
+    # tokenize is a function that takes a string and returns a list of strings (the tokens)
+    # untokenize is a function that takes a list of strings (the tokens) and returns a string
+
     return bert_tokenized_text, tokenize, untokenize
 
 

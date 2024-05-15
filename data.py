@@ -65,7 +65,8 @@ class EntityDict:
     def total_count(self):
         return sum(self.entity_count.values())
     
-    # si canvio els índexs serà problemàtic pq tot arreu on s'hagi traduït ja s'hauria de canviar...
+    # Deixo implementat pq és útil però crec que mai no voldré limitar les entitats així
+    # En tot cas simplement hauries d'utilitzar un tokenitzador millor, no perdre vocabulari
     def keep_most_frequent(self, vocab_size, always_keep_entities=[]):
         if len(self) - len(always_keep_entities) > vocab_size:
             non_special_count = {k: v for k, v in self.entity_count.items() if k not in always_keep_entities}
@@ -107,12 +108,9 @@ class TokenDict(EntityDict):
         super().keep_most_frequent(vocab_size, self.special_tokens)
 
 
-# maybe I should just call it context_window?
 
 # user, item, rating, text
-class MyDataset(Dataset): # tokenize_text, untokenize_text, 
-
-    # How exactly should I name the variable text_fixed_tokens
+class MyDataset(Dataset):
 
     def __init__(self, data_path, tokenizer, context_window):
 
@@ -140,12 +138,12 @@ class MyDataset(Dataset): # tokenize_text, untokenize_text,
         self.token_dict = TokenDict(special_tokens, self.context_window)
         original_data["tokenized_text"].apply(self.token_dict.add_sentence)
 
-        # here the optative vocab size would be applied
+        # here the optative vocab size would be applied. Però crec que MAI no m'interessa limitar el vocabulari de res
+        # en tot cas el que cal és un tokenitzador millor, o passar-li menys dades al model si no tens prou recursos
         print(f"There's {len(self.user_dict)} users")
         print(f"There's {len(self.item_dict)} items")
         print(f"There's {len(self.token_dict)} tokens")
 
-        # is this correct?
         self.user_encode = lambda x: self.user_dict.entity_to_idx.get(x)
         self.item_encode = lambda x: self.item_dict.entity_to_idx.get(x)
         self.user_decode = lambda x: self.user_dict.idx_to_entity[x]
@@ -159,98 +157,17 @@ class MyDataset(Dataset): # tokenize_text, untokenize_text,
         self.users = torch.tensor(original_data["user"].apply(self.user_encode))
         self.items = torch.tensor(original_data["item"].apply(self.item_encode))
         self.texts = torch.tensor(original_data["tokenized_text"].apply(self.text_encode))
-
-        # sense float32 peta el backwards
-        self.ratings = torch.tensor(original_data["rating"], dtype=torch.float32)
+        
+        self.ratings = torch.tensor(original_data["rating"], dtype=torch.float32) # sense especificar float32 peta el backwards
         self.max_rating = self.ratings.max()
         self.min_rating = self.ratings.min()
 
-        # si es canviessin els tokens hauria de tornar a calcular el self.texts, si no estaria mal!
-        # Per tant cal vigilar a l'hora de retallar el vocabulari
-
-        # if self.text_vocab_size is not None and len(self.token_dict) > self.text_vocab_size:
-        #     print(f'{now_time()}Keeping only {self.text_vocab_size} most frequent toekns')
-        #     old_words = self.token_dict.total_count
-        #     self.token_dict.keep_most_frequent(self.text_vocab_size)
-        #     new_words = self.token_dict.total_count
-        #     lost_percentage = 100*(old_words - new_words)/old_words
-        #     print(f"{now_time()}lost {lost_percentage:.2f}% of words")
-
-
-        # # 4.1, deixar només les paraules més freqüents
-        # old_count = self.token_dict.total_count
-        # print(f'{now_time()}Keeping only most frequent words')
-        # self.token_dict.keep_most_frequent(vocab_size)
-        # new_count = self.token_dict.total_count
-        # lost_percentage = 100*(old_count - new_count)/old_count
-        # print(f"{now_time()}lost {lost_percentage:.2f}% of words")
-
-        # # 4.2 aplicar la transformació en sí
-        # print(f'{now_time()}Transforming data')
-        # data = original_data.apply(self.transform_review, axis=1)
-        # self.users, self.items, self.ratings, self.texts = map(torch.tensor, zip(*data))
-        # print(f'{now_time()}Data ready')
-
-
-        # # 0, carregar csv original
-        # print(f'{now_time()}Loading csv...')
-        # original_data = pd.read_csv(data_path + '/reviews.csv') # No atribut de classe pq no el serialitzi
-        # original_data["text"] = original_data["text"].fillna('nan') # some text might be literally "nan" as string
-
-        # if not tokenized, needs to be tokenized
-        
-
-        # # Seria més preferible tallar a un determinat número de tokens no paruales!!!
-        # # 1, tallar tot el text a un determinat nombre de paraules
-        # # still has not been cut
-        # print(f'{now_time()}Cutting text')
-        # original_words = original_data["text"].str.split().apply(len).sum()
-        # original_data["text"] = original_data["text"].str.split().str[:self.text_max_words].str.join(' ')
-        # new_words = original_data["text"].str.split().apply(len).sum()
-        # lost_percentage = 100*(original_words - new_words)/original_words
-        # print(f"{now_time()}lost {lost_percentage:.2f}% of words")
-    
-    # def untokenize_my_text(self, tokenized_text, wrong=False):
-    #     if not wrong:
-    #         assert tokenized_text[0] == self.token_dict.bos
-    #         eos_idx = tokenized_text.index(self.token_dict.eos)
-    #         return self.untokenize_text(tokenized_text[1:eos_idx])
-        
-    #     print('WARNING: untokenizing text without checking <bos> and <eos>')
-    #     return self.untokenize_text(tokenized_text)
 
     def __len__(self):
         return len(self.users)
 
-    # això és el que agafarà el DataLoader, directament dels vectors de tensors
     def __getitem__(self, idx):
         return self.users[idx], self.items[idx], self.ratings[idx], self.texts[idx]
-    
-    # def tokenize_text(self, text): # Naive white space tokenizer
-    #     text_tokens = [self.token_dict.entity_to_idx.get(w, self.unk) for w in text.split()]
-    #     output = [self.bos, *text_tokens, self.eos] + [self.pad] * (self.text_max_words - len(text_tokens)) 
-    #     # freaking copilot it's stupid he put len(text) instead of len(text_tokens)
-    #     if len(output) != 17:
-    #         print('ERROR:', len(output))
-    #         print(output)
-    #     return output
-    
-    # def untokenize_text(self, tokenized_text, wrong=False):
-    #     if not wrong: # MUST have <bos> and <eos>
-    #         assert tokenized_text[0] == self.bos
-    #         eos_idx = None
-    #         for idx, token in enumerate(tokenized_text):
-    #             if token == self.eos:
-    #                 eos_idx = idx
-    #                 break
-    #         else:
-    #             assert(False)
-    #         return ' '.join(self.token_dict.idx_to_entity[idx] for idx in tokenized_text[1:eos_idx])
-        
-    #     print('WARNING: untokenizing text without checking <bos> and <eos>')
-    #     return ' '.join([self.token_dict.idx_to_entity[idx] for idx in tokenized_text])
-
-
 
 
 # It doesn't load the dataset, just creates splits based on the indices of the length at the folder
@@ -307,16 +224,5 @@ def setup_logger(name, log_file, stdout=False):
     return logger
 
 
-def move_to_device(content, device, transpose_text=True):
-
-    user, item, rating, text = content
-
-    user = user.to(device)
-    item = item.to(device)
-    rating = rating.to(device)
-
-    if transpose_text:
-        text = text.t()
-    text = text.to(device)
-    
-    return user, item, rating, text
+def move_to_device(content, device):
+    return tuple(element.to(device) for element in content)

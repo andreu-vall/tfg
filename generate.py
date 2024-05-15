@@ -98,6 +98,10 @@
 #     print(context_predict)
 #     print(rating_predict)
 
+# Això eren les mètriques del PETER. Tot i que no crec gaire en les mètriques i el que m'importa és més fer algo útil,
+# una mica de les mètriques sí que les hauria d'usar i calcular
+# Efectivament aquestes mètriques són del generate i no del test, en el test simplement s'usa la mateixa mètrica que el train
+
     # predicted_rating = [(r, p) for (r, p) in zip(ratings, rating_predict)] # he canviat data per dataloader
     # RMSE = root_mean_square_error(predicted_rating, max_rating, min_rating)
     # peter_logger.info(now_time() + 'RMSE {:7.4f}'.format(RMSE))
@@ -125,6 +129,8 @@
     # for (real, ctx, fake) in zip(text_test, tokens_context, text_predict):
     #     text_out += '{}\n{}\n{}\n\n'.format(real, ctx, fake)
     # return text_out
+
+
 
 import argparse
 import os
@@ -177,7 +183,7 @@ def generate(data : MyDataset, dataloader, model : PETER, device, strategy):
 
     for batch in tqdm.tqdm(dataloader):
 
-        user, item, rating, text = move_to_device(batch, device, transpose_text=False)
+        user, item, rating, text = move_to_device(batch, device)
 
         # sembla que tarda uns 2 min a generar text amb context_window = 15 amb greedy pel test
 
@@ -238,7 +244,7 @@ if __name__ == "__main__":
     mysplitdata = MySplitDataset(args.data_path, len(mydata), args.split_id, True)
 
     test_data = Subset(mydata, mysplitdata.test)
-    # té sentit fer el shuffle en el test???
+
     test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
     results = generate(mydata, test_dataloader, mymodel, mydevice, args.strategy)
@@ -250,60 +256,9 @@ if __name__ == "__main__":
 
 
     # it's predicted using: user & item only (not using the real rating, the real text or the real context)
-    # Ara mateix és només per una batch
-
-    # ara he de descodificar-ho bé ja abans d'escriure-ho en el json
-
-    # el rating no és massa interessant, el context una mica i el text sobretot
-
-
-    # seria més útil si no juntés de forma similar a l'Alejandro tots els de un junt, si no és difícil de llegir
-
-    # he de veure com es crea el context per poder-lo comparar al real
-    # how tf do I obtain the context?
 
     # La predicció de context simplement intenta predir les paraules més probables del text sense importar l'ordre,
     # de manera que l'objectiu és que sigui una tasca on no importa l'ordre i amb una única step ja predigui
     # per on anirà possiblement el text
-    # with open(result_path, 'w') as f:
-    #     #json.dump({'rating': rating.tolist(), 'context': context.tolist(), 'text': text.tolist()}, f, indent=4)
-    #     json.dump({'user': real_user, 'item': real_item, 'context': real_context, 'text': real_text}, f, indent=4)
-
-    
-
-    # què exactament vull guardar i en quin format? potser amb json és més fàcil d'interpretar que com el guardaven
-    # en el PETER, pq estan molt més clares que significa cada cosa
-
-    #prediction_path = os.path.join(path, args.outf)
-
-    
-
-    # crec que hauria de separar el test de la generació de text. El test pràcticament no té paràmetres
-    # i simplement fa exactament el mateix que s'havia fet en el train i el valid però pel dataset de test
-
-
-
-
-    # what should the test do? it can decode the text with different strategies, so it makes sense to run it
-    # multiple times with different parameters and i want to save all of them probably. so maybe i need to give
-    # also an id at the test run and save the results in that id
 
     # encara he de fer les mètriques, i si pot ser que siguin més útils que les que tenien en PETER
-
-
-    
-
-    # # this needs to be changed right now
-    # # i utilitzar el untokenizer
-    # text_o = generate(mydata, test_dataloader, mymodel, mydevice) #, args.words, myword2idx, myidx2word,
-    #                   #mydata.max_rating, mydata.min_rating, ratings, sequences)
-    
-    # # real,
-    # # context (top most probable words for this task in this order),
-    # # predicted (greedy generated left to right)
-
-    # # A part del format del PETER, potser puc fer el meu propi. Amb un json seria més fàcil d'interpretar per exemple
-
-    # with open(prediction_path, 'w', encoding='utf-8') as f:
-    #     f.write(text_o)
-    # peter_logger.info(now_time() + 'Generated text saved to ({})'.format(prediction_path))

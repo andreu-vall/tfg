@@ -13,13 +13,12 @@ from data import MyDataset, MySplitDataset, setup_logger, move_to_device
 
 
 def test(dataloader: DataLoader, model, loss_fn, device):
-    # Turn on evaluation mode which disables dropout.
-    model.eval()
+    
+    model.eval() # Turn on evaluation mode which disables dropout
 
     total_losses = torch.zeros(4)
     
     with torch.no_grad():
-        
 
         for real in dataloader: # Millor sense barra de progrés, pq només tarda uns 10 segons i ocupa espai de la pantalla per res
 
@@ -30,7 +29,7 @@ def test(dataloader: DataLoader, model, loss_fn, device):
             # inicialment tenia mida [128, 10], que és [batch_size, fixed_tokens=8(argument del train) +2]
             # print('text will be transposed, from', real[3].shape)
             
-            real = move_to_device(real, device, transpose_text=True) # en el test tmb ho transposaven
+            real = move_to_device(real, device) # en el test tmb ho transposaven. Li dono el nom real pq l'haure de passar així a un mètode
             user, item, rating, text = real
             batch_size = user.size(0)
 
@@ -40,7 +39,9 @@ def test(dataloader: DataLoader, model, loss_fn, device):
             # És com dir que en el test només prediràs exactament 1 token, que és l'últim dels texts que els passis
 
             # print('removing fsr the last token of the text')
-
+            
+            text = text.t() # Aquí el PETER el transposava
+            
             text = text[:-1]  # (src_len + tgt_len - 2, batch_size)
 
             # print('text shape is', text.shape)
@@ -88,7 +89,7 @@ if __name__ == "__main__":
     path = os.path.join('out', args.train_id)
 
     mylogs = os.path.join(path, 'logs')
-    peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log')
+    peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log', True) # si no ara mateix ni imprimeix res
     history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
     history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
 

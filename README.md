@@ -25,10 +25,15 @@ torch
 1. create_mcauley.ipynb (2014 Amazon Beauty Reviews)
 2. python split.py data/amz-beauty-review split_id_1 1
 3. python tokenizer.py data/amz-beauty-review bert-base-uncased (5 min)
-4. python train.py data/amz-beauty-review bert-base-uncased 15 split_id_1 train_id_1 --epochs 3 (each epoch takes around 2m 30s)
+4. python train.py data/amz-beauty-review bert-base-uncased 15 split_id_1 train_id_1 --epochs 3 (each epoch takes around 2m 30s amb window=15)
 5. python test.py train_id_1
 6. python generate.py train_id_1 greedy result_id_1 (1m 40s)
 ```
+
+data/amz-beauty-summary
+tokenizer.py tarda només 20 seg
+train.py context_window=20
+
 
 ## Sources
 - https://github.com/lileipisces/PETER: repo cloned, used it as a backbone but modifying things to make it more easy to understand and more pythonic
