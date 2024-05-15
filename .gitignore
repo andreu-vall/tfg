@@ -1,8 +1,18 @@
+__pycache__
 data
-raw_data
 out
 
 pendent
-tmp
 
-__pycache__
+raw_data/McAuley14/amz-beauty
+raw_data/McAuley14/amz-clothing
+raw_data/McAuley14/amz-sports
+raw_data/McAuley14/amz-toys
+
+raw_data/P5/amz-beauty
+raw_data/P5/amz-sports
+raw_data/P5/amz-toys
+
+# Possiblement aquests no els faré servir, només eren pq funcionés el PETER mentre adaptava el codi
+raw_data/CIKM20-NETE-Datasets/amz-clothing
+raw_data/CIKM20-NETE-Datasets/tripadvisor
