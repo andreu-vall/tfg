@@ -10,12 +10,16 @@ from utils.peter import now_time, content, loss, root_mean_square_error, mean_ab
 from data import MyDataset, MySplitDataset, setup_logger
 
 
+# Crec que el següent que puc fer és entendre del tot el test
+# Però aviat hauria de sopar i anar a dormir, i demà serà un altre dia
+
+
 def test(dataloader: DataLoader, model, loss_fn, device):
     
     model.eval() # Turn on evaluation mode which disables dropout
 
-    # el problema ha sigut afegir-li les prediccions aquí en el test
-    predictions = [[], [], [], []] # concat all predictions: log_word_prob, log_context_dis, rating, attns
+    rating_predictions = []
+
     total_losses = torch.zeros(4)
     
     with torch.no_grad():
@@ -37,10 +41,6 @@ def test(dataloader: DataLoader, model, loss_fn, device):
             
             batch_size = user.size(0)
 
-            # ja ho entenc, ara uso el real a un lloc i no s'ha tranposat allí el text!
-
-            # print('transposed text is', text.shape)
-
             # pq es borra en el test??? En el test només s'intenta predir l'últim token o què?
             # És com dir que en el test només prediràs exactament 1 token, que és l'últim dels texts que els passis
 
@@ -59,18 +59,39 @@ def test(dataloader: DataLoader, model, loss_fn, device):
             
             losses = loss_fn(predicted, batch) # [c_loss, r_loss, t_loss, loss]
             
-            # LOL aquesta 1 línia m'ha portat un munt de problemes
-            for i in range(4): # era un extend enlloc de append
-                predictions[i].extend(predicted[i].cpu()) # important passar-lo a cpu,
+            # ara encara em dona problemes de RAM així!!!
+
+            # # LOL aquesta 1 línia m'ha portat un munt de problemes
+            # for i in range(4): # era un extend enlloc de append
+            #     predictions[i].extend(predicted[i].cpu()) # important passar-lo a cpu,
                 # si no no ho allibera de la GPU en cada batch i per tant acaba petant per memòria
+
+            # log_word_prob, log_context_dis, rating, attns
+
+            rating_predictions.extend(predicted[2].cpu().tolist())
+
+            # el 2 són els ratings normals predits
+            # puc agafar això de moment només
+
+            # print('prectitions[1] len is', len(predictions[1])) # 128 (batch_size)
+            # print('prectitions[2] len is', len(predictions[2])) # 128
+            # print('prectitions[3] len is', len(predictions[3])) # 2
+
+            # print('prediction[0][0] shape és', predictions[0][0].shape) # [128, 11_042] (probabilitats de tots els tokens per review)
+            # print('prediction[1][0] shape és', predictions[1][0].shape) # [11_042] (probabilitats dels tokens once?)
+            # print('prediction[2][0] shape és', predictions[2][0].shape) # []???
+            # print('prediction[3][0] shape és', predictions[3][0].shape) # [128, 13, 13]
+
+            # # There's 11_042 tokens
+            # # vaig usar context_window=10, + 3 extra surten les attentions
+
+            # assert(False)
 
             total_losses += torch.tensor(losses) * batch_size
     
-    print('ha acabat el test')
-    print('les lengths de cada cosa són:', [len(elem) for elem in predictions])
-    # ara al final em surt [1716, 19850, 19850, 312] (len 2 coses del mig estan bé però les altres no?)
+    # ara al final em sortia [1716, 19850, 19850, 312]
 
-    return (total_losses / len(dataloader.dataset)).tolist(), predictions
+    return (total_losses / len(dataloader.dataset)).tolist(), rating_predictions
 
 
 # Combinar els arguments amb els de train, pq hi ha moltes coses que es necessitaven de train
@@ -130,27 +151,22 @@ if __name__ == "__main__":
                                               mytext_criterion, myrating_criterion, len(mydata.token_dict), tgt_len)
 
     # Per caluclar el MAE i el RMSE necessito els valors predits a part de les losses
-    test_losses, predictions = test(test_dataloader, mymodel, peter_loss, mydevice)
+    test_losses, rating_predictions = test(test_dataloader, mymodel, peter_loss, mydevice)
     c_loss, t_loss, r_loss, loss = test_losses
     peter_logger.info('=' * 89)
     peter_logger.info(f"{now_time()}{content(c_loss, t_loss, r_loss)} on test") # will delete it?
-
-    
-    log_word_prob, log_context_dis, predicted_rating, attns = predictions
 
     real_ratings = []
     for batch in test_dataloader:
         real_ratings.extend(batch[2].tolist())
 
-    real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, predicted_rating)]
+    real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, rating_predictions)]
 
-
+    # tinc problemes amb la RAM ara mateix
     RMSE = root_mean_square_error(real_predicted_rating, mydata.max_rating, mydata.min_rating)
     peter_logger.info(now_time() + 'RMSE {:7.4f}'.format(RMSE))
     MAE = mean_absolute_error(real_predicted_rating, mydata.max_rating, mydata.min_rating)
     peter_logger.info(now_time() + 'MAE {:7.4f}'.format(MAE))
-
-
 
     # ara mateix només ho escriu en el peter.log
     # possiblement hauria de escriure-ho per pantalla tmb, i veure q vull exactament posar en el text

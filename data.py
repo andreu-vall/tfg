@@ -151,9 +151,6 @@ class MyDataset(Dataset):
         self.text_encode = lambda x: self.token_dict.encode(x)
         self.text_decode = lambda x, raw=False: self.token_dict.decode(x, raw)
 
-        self.text_vectorize = lambda x: self.text_encode(self.tokenize(x))
-        self.text_unvectorize = lambda x, raw=False: self.untokenize(self.text_decode(x, raw))
-
         self.users = torch.tensor(original_data["user"].apply(self.user_encode))
         self.items = torch.tensor(original_data["item"].apply(self.item_encode))
         self.texts = torch.tensor(original_data["tokenized_text"].apply(self.text_encode))

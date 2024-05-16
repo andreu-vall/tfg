@@ -12,11 +12,14 @@ def bert_tokenize(data_path, override=False):
         os.makedirs(token_dir)
 
     bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+    # tokenize is a function that takes a string and returns a list of strings (the tokens)
+    # untokenize is a function that takes a list of strings (the tokens) and returns a string
     tokenize = bert_tokenizer.tokenize
     untokenize = bert_tokenizer.convert_tokens_to_string
 
-    bert_path = f"{token_dir}/bert.pkl"
 
+    bert_path = f"{token_dir}/bert.pkl"
     if os.path.exists(bert_path) and not override:
         print("Loading already bert tokenized text from", bert_path)
         bert_tokenized_text = pd.read_pickle(bert_path)
@@ -36,9 +39,6 @@ def bert_tokenize(data_path, override=False):
 
     print("Saving the tokenized text to", bert_path)
     bert_tokenized_text.to_pickle(bert_path) # pickle so that array of strings is kept, csv was a pain to read it
-
-    # tokenize is a function that takes a string and returns a list of strings (the tokens)
-    # untokenize is a function that takes a list of strings (the tokens) and returns a string
 
     return bert_tokenized_text, tokenize, untokenize
 

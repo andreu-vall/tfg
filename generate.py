@@ -115,6 +115,8 @@
     # peter_logger.info(now_time() + 'BLEU-1 {:7.4f}'.format(BLEU1))
     # BLEU4 = bleu_score(sequences, idss_predict, n_gram=4, smooth=False)
     # peter_logger.info(now_time() + 'BLEU-4 {:7.4f}'.format(BLEU4))
+
+
     # USR, USN = unique_sentence_percent(idss_predict)
     # peter_logger.info(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
     
@@ -172,9 +174,12 @@ def parse_arguments():
 
 
 
+from utils.peter import bleu_score
+
 
 def generate(data : MyDataset, dataloader, model : PETER, device, strategy):
-    results = []
+
+    results_json, results_metrics = [], []
 
     for batch in tqdm.tqdm(dataloader):
 
@@ -182,40 +187,47 @@ def generate(data : MyDataset, dataloader, model : PETER, device, strategy):
 
         user, item, rating, text = batch # en el generate no es transposa el text
 
-
         # sembla que tarda uns 2 min a generar text amb context_window = 15 amb greedy pel test
 
         # it's predicted using: user & item only (not using the real rating, the real text or the real context)
-        # Ara mateix és només per una batch
         assert strategy == 'greedy', 'Only greedy strategy is implemented'
-        predicted = model.generate(data.context_window, num_beams=1, do_sample=False,
-                                   user=user, item=item, device=device)
+        predicted = model.generate(data.context_window, num_beams=1, do_sample=False, user=user, item=item, device=device)
         predicted_rating, predicted_context, predicted_text = predicted
-
-        # Coses reals
+  
         decoded_user = [data.user_decode(u) for u in user]
         decoded_item = [data.item_decode(i) for i in item]
-        decoded_text = [data.text_unvectorize(list(t)) for t in text]
 
-        decoded_predicted_context = [data.text_unvectorize(c, raw=True) for c in predicted_context]
+        # havent entrenat una època sembla que ja ha après a generar <bos> i <eos>
+        decoded_text = [data.text_decode(list(t)) for t in text] # needs a list to call the .index
+        untokenized_text = [data.untokenize(t) for t in decoded_text]
+
+        decoded_predicted_context = [data.text_decode(list(c), raw=True) for c in predicted_context]
+        untokenized_predicted_context = [data.untokenize(c) for c in decoded_predicted_context]
 
         # sembla q tmb cal raw pq sinó peta? he entrenat ara 3 èpoques
         # Els <bos> sí que els posa, però el <eos> sembla que de moment no el posa sovint. De fet el <bos> potser el posa el model en sí
         # Potser predir l'últim token és estúpid, pq és either <eos> o <pad>, igual que el primer que és sempre <bos>
         # Entrenat 5 èpoques en el summary sí que ja ha après a posar el <bos> i <eos>
-        decoded_predicted_text = [data.text_unvectorize(list(t), raw=True) for t in predicted_text] # needs a list to call the .index
+        decoded_predicted_text = [data.text_decode(list(t)) for t in predicted_text] # , raw=True
+        untokenized_predicted_text = [data.untokenize(t) for t in decoded_predicted_text]
 
-        batch_results = [{'user': decoded_user[i],
-             'item': decoded_item[i],
-             'predicted_rating': predicted_rating[i].item(),
-             'real_rating': rating[i].item(), # cal l'item pq si no és tensor i no és serialitzable
-             'predicted_context': decoded_predicted_context[i],
-             'predicted_text': decoded_predicted_text[i],
-             'real_text': decoded_text[i]} for i in range(len(decoded_user))]
-        
-        results.extend(batch_results)
-    
-    return results
+        for i in range(len(decoded_user)):
+            results_json.append({
+                'user': decoded_user[i],
+                'item': decoded_item[i],
+                'predicted_rating': predicted_rating[i].item(), # cal l'item pq si no és tensor i no és serialitzable
+                'real_rating': rating[i].item(),
+                'predicted_context': untokenized_predicted_context[i],
+                # falta el real_context que és una mica werid
+                'predicted_text': untokenized_predicted_text[i],
+                'real_text': untokenized_text[i]
+            })
+            results_metrics.append({
+                'tokens_predicted_text': decoded_predicted_text[i],
+                'tokens_real_text': decoded_text[i]
+            })
+
+    return results_json, results_metrics
 
 
 
@@ -243,11 +255,36 @@ if __name__ == "__main__":
 
     test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
-    results = generate(mydata, test_dataloader, mymodel, mydevice, args.strategy)
+    results_json, results_metrics = generate(mydata, test_dataloader, mymodel, mydevice, args.strategy)
 
-    result_path = f"out/{args.id}/results/{args.result_id}.json"
-    with open(result_path, 'w') as f:
-        json.dump(results, f, indent=4)
+    with open(f"out/{args.id}/results/{args.result_id}.json", 'w') as f:
+        json.dump(results_json, f, indent=4)
+
+
+    tokens_text_real = [result['tokens_real_text'] for result in results_metrics]
+    tokens_text_predicted = [result['tokens_predicted_text'] for result in results_metrics]
+
+    BLEU1 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=1, smooth=False)
+    print(now_time() + 'BLEU-1 {:7.4f}'.format(BLEU1))
+    BLEU4 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=4, smooth=False)
+    print(now_time() + 'BLEU-4 {:7.4f}'.format(BLEU4))
+
+    # # Ho necessita en formats de tokens per calcular aquesta mena de coses? Quite weird ngl
+
+    # Demà seguiré per aquí + el test, i aviat he de començar a escriure la memòria ja...
+
+    # AQUIIIIIII DEMÀ 17 MAIG
+    # from utils.peter import unique_sentence_percent, rouge_score
+
+    # USR, USN = unique_sentence_percent(idss_predict)
+    # peter_logger.info(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
+    
+    # tokens_context = [' '.join([idx2word[i] for i in ids]) for ids in context_predict]
+    # ROUGE = rouge_score(text_test, text_predict)  # a dictionary
+    # for (k, v) in ROUGE.items():
+    #     peter_logger.info(now_time() + '{} {:7.4f}'.format(k, v))
+
+
 
 
     # it's predicted using: user & item only (not using the real rating, the real text or the real context)
