@@ -10,8 +10,8 @@ from torch import nn
 from torch.utils.data import Subset, DataLoader
 
 from peter_model import PETER
-from utils.peter import now_time, content, loss, peter_validation_msg
-from data import MyDataset, MySplitDataset, setup_logger, move_to_device
+from utils.peter import now_time, loss, peter_validation_msg
+from data import MyDataset, MySplitDataset, setup_logger
 from test import test
 
 
@@ -28,24 +28,25 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_i
     andreu_logger = logging.getLogger("andreu_logger") # Falta acabar de definir les coses que vull fer log jo
     # pq les de peter són kinda arbitràries i no donen l'entrenament real del model
     
-    model.train() # pq el torch ho sàpiga i prepari per backpropagation
+    model.train()
 
-    total_losses, interval_losses = torch.zeros(4), torch.zeros(4)
-    interval_sample = 0
+    total_losses = torch.zeros(4)
 
-    num_batches = len(dataloader)
-    
-    for batch, real in enumerate(tqdm.tqdm(dataloader, position=1, mininterval=1, desc=f"Epoch {epoch} progress")):
+    # mininterval de 1 segon pq no cal que es vagi actualitzant cada cop que fa un batch
+    for batch in tqdm.tqdm(dataloader, position=1, mininterval=1, desc=f"Epoch {epoch} progress"):
+
+        batch = [elem.to(device) for elem in batch] # moure a cuda
+
+        user, item, rating, text = batch
+
+        text = text.t() # en el train es transposa el text
+        batch[3] = text # pq tmb cal tranposat usat com a batch
         
-        real = move_to_device(real, device) # li dono el nom real pq l'hauré de passar a un mètode (el loss_fn)
-        user, item, rating, text = real
         batch_size = user.size(0)
 
         # M'hauria de centrar en l'important i aprendre com funciona el codi rellevant
 
         # print('before treure la última posicio, text shape is', text.shape)
-
-        text = text.t() # Aquí el PETER el transposava
  
         text = text[:-1]  # (src_len + tgt_len - 2, batch_size)
 
@@ -60,7 +61,7 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_i
         # print(text)
 
         predicted = model(user, item, text) # no s'usa el rating pel train
-        batch_losses = loss_fn(predicted, real) # però sí quan es calcula la pèrdua
+        batch_losses = loss_fn(predicted, batch) # però sí quan es calcula la pèrdua
 
         c_loss, r_loss, t_loss, loss = batch_losses
 
@@ -76,16 +77,6 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, log_i
         optimizer.zero_grad()
         
         total_losses += torch.tensor(batch_losses) * batch_size
-
-        # És millor la progress bar de tqdm que anar imprint coses cada cert interval. Potser puc borrar ja
-        interval_losses += torch.tensor(batch_losses) * batch_size
-        interval_sample += batch_size
-        if (batch + 1) % log_interval == 0 or batch == num_batches - 1: # ara començo batch a 0 enlloc de 1
-            interval_average_losses = interval_losses / interval_sample
-            context_loss, text_loss, rating_loss, real_loss = interval_average_losses
-            peter_logger.info(f"{now_time()}{content(context_loss, text_loss, rating_loss)} | {(batch+1):5d}/{num_batches:5d} batches")
-            interval_losses = torch.zeros(4)
-            interval_sample = 0
         
     return (total_losses / len(dataloader.dataset)).tolist()
 
@@ -99,20 +90,20 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
     #andreu_logger.info(now_time() + 'epoch 0')
     # print("it's computing the loss for the validation set")
     # print("li estic passant la loss_fn del model")
-    val_losses = test(val_dataloader, model, loss_fn, device)
+    # Hi ha hagut aquí un leakage
+    val_losses, val_predictions = test(val_dataloader, model, loss_fn, device)
     # print("it finished computing the loss for the validation set")
     real_loss = val_losses[3]  # real_loss for the Gradient Descent
     #andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4
 
     if epochs == 0:
-        andreu_logger.info(now_time() + 'No epochs to train')
+        andreu_logger.info(now_time() + 'No epochs to train and the model will NOT be saved')
+        return
     
-    else:
-        best_val_loss = real_loss
-        endure_count = 0
-        #andreu_logger.info(now_time() + 'Start training') # té problemes amb el tqdm tot el que posi al mateix temps per pantalla
+    best_val_loss = real_loss
+    endure_count = 0
+    #andreu_logger.info(now_time() + 'Start training') # té problemes amb el tqdm tot el que posi al mateix temps per pantalla
 
-    # mininterval so it's a bit less distracting when updating
     for epoch in tqdm.tqdm(range(1, epochs + 1), total=epochs, position=0, desc="Training progress"):
 
         peter_logger.info(f"{now_time()}epoch {epoch}")
@@ -120,7 +111,7 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
         train_losses = train_epoch(train_dataloader, model, loss_fn, optimizer, device, log_interval, args.clip, epoch)
         #andreu_logger.info(f"{now_time()}real_loss on training: {train_losses[3]}") # real_loss:4.4f
 
-        val_losses = test(val_dataloader, model, loss_fn, device)
+        val_losses, val_predictions = test(val_dataloader, model, loss_fn, device)
         real_loss = val_losses[3]  # real_loss for the Gradient Descent
 
         #andreu_logger.info(f"{now_time()}real_loss on validation: {real_loss}") # real_loss:4.4f
@@ -221,17 +212,14 @@ if __name__ == "__main__":
     with open(f'out/{args.train_id}/train.json', 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
-    # Això no ho vull veure per pantalla cada cop que executo jo... Només ho posaré en el fitxer i ja
+    # Això no ho vull veure per pantalla cada cop que executo jo... Només ho posaré en el fitxer i ja. O ni això,
+    # pq jo ja poso en el train.json els paràmetres
     peter_logger.info('-' * 40 + 'ARGUMENTS' + '-' * 40)
     for arg in vars(args):
         peter_logger.info('{:40} {}'.format(arg, getattr(args, arg)))
     peter_logger.info('-' * 40 + 'ARGUMENTS' + '-' * 40)
-
-    # Set the random seed manually for reproducibility.
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        if args.cpu:
-            peter_logger.info(now_time() + 'WARNING: You have a CUDA device, so you should probably run without --cpu')
+    
+    torch.manual_seed(args.seed) # Set the random seed manually for reproducibility.
     mydevice = torch.device('cuda' if not args.cpu else 'cpu')
 
     mymodel_path = os.path.join(mypath, 'model.pt')
@@ -303,6 +291,6 @@ if __name__ == "__main__":
     #   step_size: the number of epochs after which you want to decrease your learning rate
 
     myscheduler = torch.optim.lr_scheduler.StepLR(myoptimizer, 1, gamma=0.25)
-    
+
     train(mymodel, peter_loss, myoptimizer, myscheduler, train_dataloader, val_dataloader, args.epochs, args.endure_times,
           args.log_interval, mydevice, mymodel_path, args.rating_reg)

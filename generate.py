@@ -102,15 +102,12 @@
 # una mica de les mètriques sí que les hauria d'usar i calcular
 # Efectivament aquestes mètriques són del generate i no del test, en el test simplement s'usa la mateixa mètrica que el train
 
-    # predicted_rating = [(r, p) for (r, p) in zip(ratings, rating_predict)] # he canviat data per dataloader
-    # RMSE = root_mean_square_error(predicted_rating, max_rating, min_rating)
-    # peter_logger.info(now_time() + 'RMSE {:7.4f}'.format(RMSE))
-    # MAE = mean_absolute_error(predicted_rating, max_rating, min_rating)
-    # peter_logger.info(now_time() + 'MAE {:7.4f}'.format(MAE))
     
     # text_test = [untokenize(ids) for ids in sequences] #
     # text_predict = [untokenize(ids, wrong=True) for ids in idss_predict] # he posat que si
     # # és untrained no salti l'error si es genera una sèrie de tokens sense el <bos> ni <eos>
+
+    # Aviam vaig a mirar això de les mètriques que els agrada tant
 
 
     # # Ho necessita en formats de tokens per calcular aquesta mena de coses? Quite weird ngl
@@ -141,8 +138,8 @@ import torch
 import tqdm
 
 from utils.peter import now_time
+from peter_model import PETER
 from data import MyDataset, MySplitDataset, setup_logger
-# , now_time és un import que es fa a través de utils.peter i funciona??
 
 
 # Join cmd arguments and the arguments saved previously from the training
@@ -174,8 +171,6 @@ def parse_arguments():
     return args
 
 
-from data import move_to_device
-from peter_model import PETER
 
 
 def generate(data : MyDataset, dataloader, model : PETER, device, strategy):
@@ -183,27 +178,31 @@ def generate(data : MyDataset, dataloader, model : PETER, device, strategy):
 
     for batch in tqdm.tqdm(dataloader):
 
-        user, item, rating, text = move_to_device(batch, device)
+        batch = [elem.to(device) for elem in batch] # moure a cuda
+
+        user, item, rating, text = batch # en el generate no es transposa el text
+
 
         # sembla que tarda uns 2 min a generar text amb context_window = 15 amb greedy pel test
 
         # it's predicted using: user & item only (not using the real rating, the real text or the real context)
         # Ara mateix és només per una batch
         assert strategy == 'greedy', 'Only greedy strategy is implemented'
-        predicted = model.generate(data.context_window, num_beams=1, do_sample=False, user=user, item=item, device=device)
+        predicted = model.generate(data.context_window, num_beams=1, do_sample=False,
+                                   user=user, item=item, device=device)
         predicted_rating, predicted_context, predicted_text = predicted
 
         # Coses reals
         decoded_user = [data.user_decode(u) for u in user]
         decoded_item = [data.item_decode(i) for i in item]
         decoded_text = [data.text_unvectorize(list(t)) for t in text]
-        # estava mirant com es creava el context per comparar-ho amb el real
 
         decoded_predicted_context = [data.text_unvectorize(c, raw=True) for c in predicted_context]
 
         # sembla q tmb cal raw pq sinó peta? he entrenat ara 3 èpoques
         # Els <bos> sí que els posa, però el <eos> sembla que de moment no el posa sovint. De fet el <bos> potser el posa el model en sí
         # Potser predir l'últim token és estúpid, pq és either <eos> o <pad>, igual que el primer que és sempre <bos>
+        # Entrenat 5 èpoques en el summary sí que ja ha après a posar el <bos> i <eos>
         decoded_predicted_text = [data.text_unvectorize(list(t), raw=True) for t in predicted_text] # needs a list to call the .index
 
         batch_results = [{'user': decoded_user[i],
@@ -231,9 +230,6 @@ if __name__ == "__main__":
 
     history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
 
-    if torch.cuda.is_available():
-        if args.cpu:
-            peter_logger.info(now_time() + 'WARNING: You have a CUDA device, so you should probably run without --cpu')
     mydevice = torch.device('cuda' if not args.cpu else 'cpu')
 
     model_path = os.path.join(path, 'model.pt')
@@ -250,7 +246,6 @@ if __name__ == "__main__":
     results = generate(mydata, test_dataloader, mymodel, mydevice, args.strategy)
 
     result_path = f"out/{args.id}/results/{args.result_id}.json"
-
     with open(result_path, 'w') as f:
         json.dump(results, f, indent=4)
 

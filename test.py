@@ -4,34 +4,40 @@ import torch
 import torch.nn as nn
 import json
 import sys
-
 from torch.utils.data import DataLoader, Subset
 
-from utils.peter import now_time, content, loss
-
-from data import MyDataset, MySplitDataset, setup_logger, move_to_device
+from utils.peter import now_time, content, loss, root_mean_square_error, mean_absolute_error
+from data import MyDataset, MySplitDataset, setup_logger
 
 
 def test(dataloader: DataLoader, model, loss_fn, device):
     
     model.eval() # Turn on evaluation mode which disables dropout
 
+    # el problema ha sigut afegir-li les prediccions aquí en el test
+    predictions = [[], [], [], []] # concat all predictions: log_word_prob, log_context_dis, rating, attns
     total_losses = torch.zeros(4)
     
     with torch.no_grad():
 
-        for real in dataloader: # Millor sense barra de progrés, pq només tarda uns 10 segons i ocupa espai de la pantalla per res
+        for batch in dataloader: # Millor sense barra de progrés, pq només tarda uns 10 segons i ocupa espai de la pantalla per res
 
-            # print('in the test')
+            assert len(batch) == 4
 
-            assert len(real) == 4
+            batch = [elem.to(device) for elem in batch] # moure a cuda
 
+            user, item, rating, text = batch
+
+            text = text.t() # en el test es transposa el text
+
+            batch[3] = text # pq tmb cal tranposat usat com a batch
+            
             # inicialment tenia mida [128, 10], que és [batch_size, fixed_tokens=8(argument del train) +2]
             # print('text will be transposed, from', real[3].shape)
             
-            real = move_to_device(real, device) # en el test tmb ho transposaven. Li dono el nom real pq l'haure de passar així a un mètode
-            user, item, rating, text = real
             batch_size = user.size(0)
+
+            # ja ho entenc, ara uso el real a un lloc i no s'ha tranposat allí el text!
 
             # print('transposed text is', text.shape)
 
@@ -39,8 +45,6 @@ def test(dataloader: DataLoader, model, loss_fn, device):
             # És com dir que en el test només prediràs exactament 1 token, que és l'últim dels texts que els passis
 
             # print('removing fsr the last token of the text')
-            
-            text = text.t() # Aquí el PETER el transposava
             
             text = text[:-1]  # (src_len + tgt_len - 2, batch_size)
 
@@ -53,11 +57,20 @@ def test(dataloader: DataLoader, model, loss_fn, device):
             # predir l'última paraula del text. Crec que tindria més sentit intentar-los predir tots alhora però per separat,
             # i després quan vulguis generar text amb sentit sí que té sentit generar-los de forma seqüencial
             
-            losses = loss_fn(predicted, real) # [c_loss, r_loss, t_loss, loss]
+            losses = loss_fn(predicted, batch) # [c_loss, r_loss, t_loss, loss]
+            
+            # LOL aquesta 1 línia m'ha portat un munt de problemes
+            for i in range(4): # era un extend enlloc de append
+                predictions[i].extend(predicted[i].cpu()) # important passar-lo a cpu,
+                # si no no ho allibera de la GPU en cada batch i per tant acaba petant per memòria
 
             total_losses += torch.tensor(losses) * batch_size
+    
+    print('ha acabat el test')
+    print('les lengths de cada cosa són:', [len(elem) for elem in predictions])
+    # ara al final em surt [1716, 19850, 19850, 312] (len 2 coses del mig estan bé però les altres no?)
 
-    return (total_losses / len(dataloader.dataset)).tolist()
+    return (total_losses / len(dataloader.dataset)).tolist(), predictions
 
 
 # Combinar els arguments amb els de train, pq hi ha moltes coses que es necessitaven de train
@@ -106,29 +119,43 @@ if __name__ == "__main__":
     mysplitdata = MySplitDataset(args.data_path, len(mydata), args.split_id, load_split=True)
 
     test_data = Subset(mydata, mysplitdata.test)
-    # té sentit fer el shuffle en el test???
     test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
-    pad_idx = mydata.token_dict.pad
-
-
     tgt_len = args.context_window + 1  # added <bos> or <eos>
-    ntokens = len(mydata.token_dict)
 
-    mytext_criterion = nn.NLLLoss(ignore_index=pad_idx)  # És això duplicació de codi?
+    mytext_criterion = nn.NLLLoss(ignore_index=mydata.token_dict.pad)
     myrating_criterion = nn.MSELoss()
 
     peter_loss = lambda predicted, real: loss(predicted, real, args.context_reg, args.text_reg, args.rating_reg,
-                                              mytext_criterion, myrating_criterion, ntokens, tgt_len)
+                                              mytext_criterion, myrating_criterion, len(mydata.token_dict), tgt_len)
 
-    # Run on test data.
-    test_losses = test(test_dataloader, mymodel, peter_loss, mydevice)
+    # Per caluclar el MAE i el RMSE necessito els valors predits a part de les losses
+    test_losses, predictions = test(test_dataloader, mymodel, peter_loss, mydevice)
     c_loss, t_loss, r_loss, loss = test_losses
     peter_logger.info('=' * 89)
-    peter_logger.info(f"{now_time()}{content(c_loss, t_loss, r_loss)} on test")
+    peter_logger.info(f"{now_time()}{content(c_loss, t_loss, r_loss)} on test") # will delete it?
+
+    
+    log_word_prob, log_context_dis, predicted_rating, attns = predictions
+
+    real_ratings = []
+    for batch in test_dataloader:
+        real_ratings.extend(batch[2].tolist())
+
+    real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, predicted_rating)]
+
+
+    RMSE = root_mean_square_error(real_predicted_rating, mydata.max_rating, mydata.min_rating)
+    peter_logger.info(now_time() + 'RMSE {:7.4f}'.format(RMSE))
+    MAE = mean_absolute_error(real_predicted_rating, mydata.max_rating, mydata.min_rating)
+    peter_logger.info(now_time() + 'MAE {:7.4f}'.format(MAE))
+
+
 
     # ara mateix només ho escriu en el peter.log
     # possiblement hauria de escriure-ho per pantalla tmb, i veure q vull exactament posar en el text
     # ara en el test tampoc no es veu la barra del progrés pq la he tret en general de quan es feia test,
     # ja que quan es fa el test amb la validation no aportava realemnt gaire
 
+    # No entenc que he canviat pq ara peti
+    # He de tornar a entrenar?

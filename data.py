@@ -222,7 +222,3 @@ def setup_logger(name, log_file, stdout=False):
     if stdout:
         logger.addHandler(logging.StreamHandler())      # Log to stdout
     return logger
-
-
-def move_to_device(content, device):
-    return tuple(element.to(device) for element in content)
