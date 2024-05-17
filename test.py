@@ -14,6 +14,10 @@ from data import MyDataset, MySplitDataset, setup_logger
 # Però aviat hauria de sopar i anar a dormir, i demà serà un altre dia
 
 
+
+# Hauria de veure ara ja pq cullons borra un token del text en el test, quin sentit té? Crec que cap
+
+
 def test(dataloader: DataLoader, model, loss_fn, device):
     
     model.eval() # Turn on evaluation mode which disables dropout
@@ -26,20 +30,22 @@ def test(dataloader: DataLoader, model, loss_fn, device):
 
         for batch in dataloader: # Millor sense barra de progrés, pq només tarda uns 10 segons i ocupa espai de la pantalla per res
 
-            assert len(batch) == 4
-
             batch = [elem.to(device) for elem in batch] # moure a cuda
 
             user, item, rating, text = batch
+            batch_size = user.size(0)
+
+
+            # Tècnicament es podria construir un text sencer, però cada single token seria generat a partir de
+            # el text real que vols predir + només s'afegiria un token a la predicció. I la resta de tokens es
+            # seguirien fent usant fins al step N - 1 el text real, pq el predit els generen tots en paral·lel
+            # i per tant encara no els has generat
 
             text = text.t() # en el test es transposa el text
-
             batch[3] = text # pq tmb cal tranposat usat com a batch
             
             # inicialment tenia mida [128, 10], que és [batch_size, fixed_tokens=8(argument del train) +2]
             # print('text will be transposed, from', real[3].shape)
-            
-            batch_size = user.size(0)
 
             # pq es borra en el test??? En el test només s'intenta predir l'últim token o què?
             # És com dir que en el test només prediràs exactament 1 token, que és l'últim dels texts que els passis
@@ -51,12 +57,14 @@ def test(dataloader: DataLoader, model, loss_fn, device):
             # print('text shape is', text.shape)
             # print('text is', text)
 
-            predicted = model(user, item, text)
+            # en el step de test simplement es crida un model(user, item, text normal)
+            predicted = model(user, item, text) 
 
             # En aquest cas si es fa servir per algo la predicció de l'últim token és una mica estúpid pq només està intenant
             # predir l'última paraula del text. Crec que tindria més sentit intentar-los predir tots alhora però per separat,
             # i després quan vulguis generar text amb sentit sí que té sentit generar-los de forma seqüencial
             
+            # es calcula la loss_fn EXACTAMENT igual que en el train
             losses = loss_fn(predicted, batch) # [c_loss, r_loss, t_loss, loss]
             
             # ara encara em dona problemes de RAM així!!!
@@ -86,6 +94,8 @@ def test(dataloader: DataLoader, model, loss_fn, device):
             # # vaig usar context_window=10, + 3 extra surten les attentions
 
             # assert(False)
+
+            assert(False)
 
             total_losses += torch.tensor(losses) * batch_size
     
@@ -156,13 +166,14 @@ if __name__ == "__main__":
     peter_logger.info('=' * 89)
     peter_logger.info(f"{now_time()}{content(c_loss, t_loss, r_loss)} on test") # will delete it?
 
+    # Mètriques del test: RMSE, MAE
+
     real_ratings = []
     for batch in test_dataloader:
         real_ratings.extend(batch[2].tolist())
 
     real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, rating_predictions)]
 
-    # tinc problemes amb la RAM ara mateix
     RMSE = root_mean_square_error(real_predicted_rating, mydata.max_rating, mydata.min_rating)
     peter_logger.info(now_time() + 'RMSE {:7.4f}'.format(RMSE))
     MAE = mean_absolute_error(real_predicted_rating, mydata.max_rating, mydata.min_rating)

@@ -13,6 +13,8 @@ from utils.module import PositionalEncoding, TransformerEncoderLayer, Transforme
     generate_peter_mask, generate_square_subsequent_mask
 
 
+# He de simplificar el codi i els arguments
+
 class PETER(nn.Module):
     # Crec que aquí hi ha masses arguments?
     def __init__(self, peter_mask, src_len, tgt_len, nuser, nitem, ntoken, emsize,
@@ -83,22 +85,25 @@ class PETER(nn.Module):
         word_prob = self.hidden2token(hidden[-1])  # (batch_size, ntoken)
         log_word_prob = func.log_softmax(word_prob, dim=-1)
         return log_word_prob
-    
 
-    # give the most probable things 
     @staticmethod
-    def predict(log_context_dis, topk):
-        word_prob = log_context_dis.exp()  # (batch_size, ntoken)
+    def get_topk_tokens(log_token_dis, topk):
+        token_prob = log_token_dis.exp()  # (batch_size, ntoken)
         if topk == 1:
-            context = torch.argmax(word_prob, dim=1, keepdim=True)  # (batch_size, 1)
+            context = torch.argmax(token_prob, dim=1, keepdim=True)  # (batch_size, 1)
         else:
-            context = torch.topk(word_prob, topk, 1)[1]  # (batch_size, topk)
+            context = torch.topk(token_prob, topk, 1)[1]  # (batch_size, topk)
         return context  # (batch_size, topk)
 
 
     # tot i que sembla que funciona, encara falten implementar coses i acabar-la de mirar
     # abans de mirar-me el generate he d'entendre també com funciona en el train i test
     # tot i que potser mirarar el generate tmb ajuda
+
+    # Es podria generar text amb max_length <= self.context_window, i a partir d'aquí si el vulguessis fer més llarg
+    # ja no li podries passar tot el text prèviament generat pel propi model, i.e. no és capaç de agafar un input
+    # tant llarg. Encara hauria de simplificar els arguments del PETER per realment només els que crec que són útils
+    # i provar a jugar amb ells com varien les coses
     def generate(self, max_length, num_beams, do_sample, user, item, device):
 
         assert num_beams==1, "only greedy generation for now" # per donar una pista amb l'assert
@@ -131,11 +136,17 @@ class PETER(nn.Module):
         # tindria sentit anar ajustant la predicció dels ratings i context en cada step? Crec que no, perquè la cosa és que les
         # generes això en primer lloc i després vas generant el text a poc a poc amb la idea de en base de això hauria de ser
 
+        # És necessari executar el model max_length cops, perquè l'únic que sap fer el model és predir exactament 1 token més
+        # a partir de tot el que ja sap, i si no sap res doncs necessitarà max_length cops per generar el text de la longitud
+        # que vulguis
+
         for step in range(max_length):
-            if step == 0:
-                log_word_prob, log_context_dis, rating, _ = self.forward(user, item, text, False) # copilot fail, found out soon at least
-                context = PETER.predict(log_context_dis, topk=max_length)
-            else:
+            if step == 0: # step 0: es calcula el rating, el context i el 1r token
+                log_word_prob, log_context_dis, rating, _ = self.forward(user, item, text, False)
+                context = PETER.get_topk_tokens(log_context_dis, topk=max_length)
+            else: # step > 0: se li introdueix el seu text que havia generat fins ara i es NOMÉS el següent token
+                  # tècnicament el model també torna a calcular una altra predicció de context i rating però s'ignora,
+                  # perquè el que importa aquí és generar un text llarg de manera autoregressiva
                 log_word_prob, _, _, _ = self.forward(user, item, text, False, False, False)
             _, next_token = torch.max(log_word_prob, dim=-1)
             text = torch.cat([text, next_token.unsqueeze(0)], 0) # aquí és on es concatena
