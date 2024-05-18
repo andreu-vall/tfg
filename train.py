@@ -1,16 +1,14 @@
-import sys
 import os
 import json
 import tqdm
-
 import torch
 import argparse
 from torch import nn
 from torch.utils.data import Subset, DataLoader
 
 from peter_model import PETER
-from utils.peter import now_time, loss, peter_validation_msg
-from data import MyDataset, MySplitDataset, setup_logger
+from utils.peter import now_time, peter_validation_msg
+from data import MyDataset, MySplitDataset, record_execution
 from test import test
 from losses import peter_loss
 
@@ -52,49 +50,62 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, clip,
         
         total_losses += torch.tensor(batch_losses) * batch_size
         
-        
-    return (total_losses / len(dataloader.dataset)).tolist()
+
+    losses = total_losses / len(dataloader.dataset)
+
+    losses_dic = {
+        'loss': losses[0].item(),
+        'context_loss': losses[1].item(),
+        'text_loss': losses[2].item(),
+        'rating_loss': losses[3].item()
+    }
+    return losses_dic
 
 
 # wait ara mateix a l'època 2 ja hi ha hagut un overfit? kinda strange que entreni tant ràpid no?
 # hauria de guardar totes les dades importants de l'entrenament en un json crec
 def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader, epochs, endure_times, \
-          device, model_path, rating_reg):
+          device, model_path):
+    
+    metrics = [] # metrics serà en cada posició un diccionari
 
     val_losses = test(val_dataloader, model, loss_fn, device)
-    real_loss = val_losses[3]  # real_loss for the Gradient Descent
+    metrics.append({
+        "epoch": 0,
+        "valid": val_losses
+    })
 
-    if epochs == 0:
-        print(now_time() + 'No epochs to train and the model will NOT be saved')
-        return
+    with open(model_path, 'wb') as f:
+        torch.save(model, f)
     
-    best_val_loss = real_loss
+    best_val_loss = val_losses['loss']
     endure_count = 0
 
     for epoch in tqdm.tqdm(range(1, epochs + 1), total=epochs, position=0, desc="Training progress"):
 
         train_losses = train_epoch(train_dataloader, model, loss_fn, optimizer, device, args.clip, epoch)
-
         val_losses = test(val_dataloader, model, loss_fn, device)
-        real_loss = val_losses[3]  # real_loss for the Gradient Descent
 
-        print(peter_validation_msg(val_losses, rating_reg))
+        metrics.append({
+            "epoch": epoch,
+            "learning_rate": scheduler.get_last_lr()[0], # Torna mútliples grups de params
+            "train": train_losses,
+            "valid": val_losses
+        })
 
-        if real_loss < best_val_loss:
-            best_val_loss = real_loss
+        if val_losses['loss'] < best_val_loss:
+            best_val_loss = val_losses['loss'] 
             with open(model_path, 'wb') as f:
                 torch.save(model, f)
         else:
             endure_count += 1
-            print(f"{now_time()}Endured {endure_count}/{endure_times} time(s)")
             if endure_count == endure_times:
                 print(now_time() + 'Cannot endure it anymore | Exiting from early stop')
                 break
             
             scheduler.step()
-
-            # millor guardar en json en algun lloc
-            print(f"{now_time()}Learning rate set to {scheduler.get_last_lr()[0]}") # Torna mútliples grups de params
+    
+    return metrics
     
 
 
@@ -161,17 +172,9 @@ if __name__ == "__main__":
         raise ValueError('This id already exists!')
     os.makedirs(mypath)
 
-    mylogs = os.path.join(mypath, 'logs')
-    os.makedirs(mylogs)
+    record_execution(mypath)
 
-    # aquest sí que crec que pot ser molt útil per saber quan i què vas executar
-    history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
-    history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
 
-    # Si en un altre lloc ja faig el logs dels arguments i aquest el vull més aviat per carregar-los en el test,
-    # potser no tots els arguments són necessaris pel test (n'hi ha que són específics del train)
-    with open(f'out/{args.train_id}/train_parameters.json', 'w') as f:
-        json.dump(args.__dict__, f, indent=2)
     
     torch.manual_seed(args.seed) # Set the random seed manually for reproducibility.
     mydevice = torch.device('cuda' if not args.cpu else 'cpu')
@@ -237,5 +240,12 @@ if __name__ == "__main__":
 
     myscheduler = torch.optim.lr_scheduler.StepLR(myoptimizer, 1, gamma=0.25)
 
-    train(mymodel, myloss_fn, myoptimizer, myscheduler, mytrain_dataloader, myval_dataloader,
-          args.epochs, args.endure_times, mydevice, mymodel_path, args.rating_reg)
+    train_metrics = train(mymodel, myloss_fn, myoptimizer, myscheduler, mytrain_dataloader, myval_dataloader,
+          args.epochs, args.endure_times, mydevice, mymodel_path)
+    
+    train_json = {
+        'parameters': args.__dict__,
+        'metrics': train_metrics
+    }
+    with open(f'out/{args.train_id}/train.json', 'w') as f:
+        json.dump(train_json, f, indent=2)

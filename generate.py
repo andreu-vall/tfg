@@ -1,7 +1,6 @@
 import argparse
 import os
 import json
-import sys
 from torch.utils.data import DataLoader, Subset
 import torch
 import tqdm
@@ -9,7 +8,7 @@ import torch.nn as nn
 
 from utils.peter import now_time, unique_sentence_percent, bleu_score, rouge_score
 from peter_model import PETER
-from data import MyDataset, MySplitDataset, setup_logger
+from data import MyDataset, MySplitDataset, setup_logger, record_execution
 
 
 # Crec que hauria de moure aquests 2 mètodes fora
@@ -211,9 +210,7 @@ if __name__ == "__main__":
     
     path = os.path.join('out', args.id)
 
-    mylogs = os.path.join(path, 'logs')
-    history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
-    history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
+    record_execution(path)
 
     mydevice = torch.device('cuda' if not args.cpu else 'cpu')
 

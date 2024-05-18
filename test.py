@@ -3,12 +3,11 @@ import os
 import torch
 import torch.nn as nn
 import json
-import sys
 import tqdm
 from torch.utils.data import DataLoader, Subset
 
 from utils.peter import now_time, content, root_mean_square_error, mean_absolute_error
-from data import MyDataset, MySplitDataset, setup_logger
+from data import MyDataset, MySplitDataset, record_execution
 from losses import peter_loss
 from generate import get_topk_tokens
 
@@ -161,13 +160,19 @@ def test(dataloader:DataLoader, model, loss_fn, device, save_results=False, data
             #     predictions[i].extend(predicted[i].cpu()) # important passar-lo a cpu,
                 # si no no ho allibera de la GPU en cada batch i per tant acaba petant per memòria
 
+    losses = total_losses / len(dataloader.dataset)
 
-    losses = (total_losses / len(dataloader.dataset)).tolist()
+    losses_dic = {
+        'loss': losses[0].item(),
+        'context_loss': losses[1].item(),
+        'text_loss': losses[2].item(),
+        'rating_loss': losses[3].item()
+    }
 
     if not save_results:
-        return losses # seria millor tornar un results buit? no crec
+        return losses_dic # seria millor tornar un results buit? no crec
     
-    return losses, results
+    return losses_dic, results
 
 
 # Combinar els arguments amb els de train, pq hi ha moltes coses que es necessitaven de train
@@ -198,9 +203,7 @@ if __name__ == "__main__":
 
     path = os.path.join('out', args.train_id)
 
-    mylogs = os.path.join(path, 'logs')
-    history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
-    history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
+    record_execution(path)
 
     if torch.cuda.is_available():
         if args.cpu:

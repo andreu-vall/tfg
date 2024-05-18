@@ -93,14 +93,8 @@ def content(context_loss, text_loss, rating_loss):
 
 
 
-
-# Encara estic intenant veure d'on ve el context...
-# Això és la clau de l'entrenament. Depenen del que si posis loss aprendrà a fer una cosa o altra el model
+# pendent: borrar-la
 def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rating_criterion, ntokens, tgt_len):
-
-    # Aquesta és la loss function que utiliza SEMPRE el model per entrenar i fer el test inclús
-
-    # Què vull fer servir jo?
 
     # de predicted només s'utilitza: 
     # log_word_prob les probabilitats en cada query sobre tots els tokens del vocabulari

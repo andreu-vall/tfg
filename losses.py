@@ -1,5 +1,6 @@
    
 
+# Ara aquesta és la loss que utilitzo
 def peter_loss(loss_input, loss_output, text_criterion, rating_criterion,
                context_reg, text_reg, rating_reg, ntokens, tgt_len):
         

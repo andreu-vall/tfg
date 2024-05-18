@@ -5,7 +5,7 @@ import torch
 import pandas as pd
 import heapq
 from torch.utils.data import Dataset, random_split
-import pickle
+import sys
 import logging
 
 from utils.peter import now_time
@@ -265,3 +265,8 @@ def setup_logger(name, log_file, stdout=False):
     if stdout:
         logger.addHandler(logging.StreamHandler())      # Log to stdout
     return logger
+
+
+def record_execution(path):
+    history_logger = setup_logger('history_logger', f'{path}/history.log')
+    history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
