@@ -7,7 +7,7 @@ from torch import nn
 from torch.utils.data import Subset, DataLoader
 
 from peter_model import PETER
-from utils.peter import now_time, peter_validation_msg
+from utils.peter import now_time
 from data import MyDataset, MySplitDataset, record_execution
 from test import test
 from losses import peter_loss
@@ -38,8 +38,9 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, clip,
         loss_input = [log_word_prob, log_context_dis, predicted_rating]
         loss_output = [target_text, rating]
         batch_losses = loss_fn(loss_input, loss_output)
-        total_loss, context_loss, rating_loss, text_loss = batch_losses # per si vull les losses individuals
-        total_loss.backward()
+
+        batch_loss = batch_losses[0]
+        batch_loss.backward() # El típic gradient descent que torch ja ho fa sol
 
         # Això ho han posat els de PETER, cal comprovar si realment és necessari
         # `clip_grad_norm` helps prevent the exploding gradient problem.
@@ -248,4 +249,4 @@ if __name__ == "__main__":
         'metrics': train_metrics
     }
     with open(f'out/{args.train_id}/train.json', 'w') as f:
-        json.dump(train_json, f, indent=2)
+        json.dump(train_json, f, indent=4)

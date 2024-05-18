@@ -196,8 +196,8 @@ def parse_arguments():
     if os.path.isfile(result_path):
         raise ValueError('This result id already exists!')
 
-    with open(f'{path}/train_parameters.json', 'r') as f:
-        train_args = json.load(f)
+    with open(f'{path}/train.json', 'r') as f:
+        train_args = json.load(f)['parameters']
     
     merged_args = {**train_args, **vars(cmd_args)} # el segon diccionari sobreescriu el primer segons Copilot
     args = argparse.Namespace(**merged_args)
@@ -230,6 +230,11 @@ if __name__ == "__main__":
     do_sample = False
 
     results_json, results_metrics = generate(mydata, test_dataloader, mymodel, mydevice, num_beams, do_sample)
+
+
+    # falta escriure les mètriques en el json. De fet aquestes mètriques tmb les podria calcular igual en el test
+    # tot i que tindrien una interpretació lleugerament diferent. Falta acabar-les de confirmar que són % la majoria
+    # i veure si puc juntar parts del codi del test i del generate
 
 
     with open(f"out/{args.id}/results/{args.result_id}.json", 'w') as f:

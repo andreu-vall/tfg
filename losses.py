@@ -12,6 +12,7 @@ def peter_loss(loss_input, loss_output, text_criterion, rating_criterion,
         context_loss = text_criterion(context_dis.view(-1, ntokens), context_target_text.reshape((-1,)))
 
         text_loss = text_criterion(log_word_prob.view(-1, ntokens), target_text.reshape((-1,)))
+
         rating_loss = rating_criterion(predicted_rating, real_rating)
 
         total_loss = context_loss * context_reg + text_loss * text_reg + rating_loss * rating_reg

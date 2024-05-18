@@ -6,7 +6,7 @@ import json
 import tqdm
 from torch.utils.data import DataLoader, Subset
 
-from utils.peter import now_time, content, root_mean_square_error, mean_absolute_error
+from utils.peter import now_time, root_mean_square_error, mean_absolute_error
 from data import MyDataset, MySplitDataset, record_execution
 from losses import peter_loss
 from generate import get_topk_tokens
@@ -188,8 +188,8 @@ def parse_arguments():
     if not os.path.exists(path):
         raise ValueError('This id doesn\'t exist!')
 
-    with open(f'out/{cmd_args.train_id}/train_parameters.json', 'r') as f:
-        train_args = json.load(f)
+    with open(f'out/{cmd_args.train_id}/train.json', 'r') as f:
+        train_args = json.load(f)['parameters']
 
     merged_args = {**train_args, **vars(cmd_args)} # el segon diccionari sobreescriu el primer segons Copilot
     args = argparse.Namespace(**merged_args)
@@ -232,30 +232,23 @@ if __name__ == "__main__":
     )
     # Aquí en el test sí que passo el data ara mateix per fer descodificacions. en canvi en el train no el passava
     # Per caluclar el MAE i el RMSE necessito els valors predits a part de les losses
-    test_losses, test_results = test(mytest_dataloader, mymodel, myloss_fn, mydevice, save_results=True, data=mydata)
-    c_loss, t_loss, r_loss, loss = test_losses
-    print(f"{now_time()}{content(c_loss, t_loss, r_loss)} on test") # will delete it?
-    # Això encara són mètriques weird del PETER que he de canviar per les losses reals del model,
-    # ja que no representen realment la loss que avalua el model
+    losses_dic, results = test(mytest_dataloader, mymodel, myloss_fn, mydevice, save_results=True, data=mydata)
 
-    # De fet falten calcular les mètriques abans de posar en el json
-    with open(f"out/{args.train_id}/test_results.json", 'w') as f:
-        json.dump(test_results, f, indent=4)
-    
-    rating_predictions = [result['predicted_rating'] for result in test_results]
-    real_ratings = [result['real_rating'] for result in test_results]
-
+    rating_predictions = [result['predicted_rating'] for result in results]
+    real_ratings = [result['real_rating'] for result in results]
     real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, rating_predictions)]
 
     RMSE = root_mean_square_error(real_predicted_rating, mydata.max_rating, mydata.min_rating)
-    print(now_time() + 'RMSE {:7.4f}'.format(RMSE))
     MAE = mean_absolute_error(real_predicted_rating, mydata.max_rating, mydata.min_rating)
-    print(now_time() + 'MAE {:7.4f}'.format(MAE))
 
-    # ara mateix només ho escriu en el peter.log
-    # possiblement hauria de escriure-ho per pantalla tmb, i veure q vull exactament posar en el text
-    # ara en el test tampoc no es veu la barra del progrés pq la he tret en general de quan es feia test,
-    # ja que quan es fa el test amb la validation no aportava realemnt gaire
-
-    # No entenc que he canviat pq ara peti
-    # He de tornar a entrenar?
+    metrics = {
+        "losses": losses_dic,
+        "RMSE": RMSE,
+        "MAE": MAE
+    }
+    results_json = {
+        "metrics": metrics,
+        "results": results
+    }
+    with open(f"out/{args.train_id}/test.json", 'w') as f:
+        json.dump(results_json, f, indent=4)

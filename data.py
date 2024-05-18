@@ -246,7 +246,7 @@ class MySplitDataset:
     def save_split(self):
         split = {'train': self.train, 'valid': self.valid, 'test': self.test}
         for name in self.names:
-            with open(f"{self.split_dir}/{name}.index", 'w') as f:
+            with open(f"{self.split_dir}/{name}.index", 'w') as f: # same format that PETER used
                 f.write(' '.join(map(str, split[name])))
 
     def create_split(self, seed, data_length):
