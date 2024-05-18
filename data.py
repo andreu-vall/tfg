@@ -322,7 +322,7 @@ def get_RMSE_MAE(results, max_rating, min_rating):
     real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, predicted_ratings)]
 
     RMSE = root_mean_square_error(real_predicted_rating, max_rating, min_rating)
-    MAE = mean_absolute_error(real_predicted_rating, max_rating, min_rating)
+    MAE = mean_absolute_error(real_predicted_rating, max_rating, min_rating).item() # this seems to be a tensor?
 
     return RMSE, MAE
     
