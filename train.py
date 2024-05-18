@@ -1,6 +1,5 @@
 import sys
 import os
-import logging
 import json
 import tqdm
 
@@ -16,14 +15,8 @@ from test import test
 from losses import peter_loss
 
 
-# Abans d'afegir funcionalitat extra, la funcionalitat bàsica l'hauria de tenir més clara i
-# entendre finalment com funcionen els transformers, que encara no ho tinc clar del tot en codi.
-
-
 # i put one hint only, in general it's better to hint all the types
 def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, clip, epoch):
-
-    # pq les de peter són kinda arbitràries i no donen l'entrenament real del model
     
     model.train()
 
@@ -38,77 +31,37 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, clip,
         batch_size = user.size(0)
 
         transposed_text = text.t() # Generarem text a nivell de token per tots els usuaris
-
         input_text = transposed_text[:-1]
         target_text = transposed_text[1:] # output text is shifted right
 
         predicted = model(user, item, input_text)
-
-        log_word_prob, log_context_dis, predicted_rating, _ = predicted
+        log_word_prob, log_context_dis, predicted_rating, attns = predicted # per si vull les atencions
 
         loss_input = [log_word_prob, log_context_dis, predicted_rating]
         loss_output = [target_text, rating]
-
         batch_losses = loss_fn(loss_input, loss_output)
-
-        total_loss, context_loss, rating_loss, text_loss = batch_losses
-
+        total_loss, context_loss, rating_loss, text_loss = batch_losses # per si vull les losses individuals
         total_loss.backward()
 
-        # Això ho han posat els de PETER, comprovar si realment és necessari
+        # Això ho han posat els de PETER, cal comprovar si realment és necessari
         # `clip_grad_norm` helps prevent the exploding gradient problem.
         torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
         
         optimizer.step() # Update els paràmetres del model segons la loss i l'optimitzador
-
-        # Canviat al final com a l'exemple bo, aviam si així s'arregla. YAY s'ha solucionat
-        optimizer.zero_grad()
+        optimizer.zero_grad() # cal posar a 0 manualment els gradients de torch, pq si no els guarda per la següent iteració
         
         total_losses += torch.tensor(batch_losses) * batch_size
-
-        # M'hauria de centrar en l'important i aprendre com funciona el codi rellevant
-
-        # print('before treure la última posicio, text shape is', text.shape)
- 
-
-        # AVIAM PROVO A TOT ARREU DE TREURE AIXÒ QUE PER MI NO TÉ SENTIT
-        #1234
-        #text = text[:-1]  # (src_len + tgt_len - 2, batch_size)
-
-        # Veig que sí que es pot fer un shifting, però crec que hauria de ser
-        # abans de passar-lo a la loss function. Efectivament ho feien ells
-        # el shifting abans de passar-lo a la loss function. La qüestió és
-        # doncs si hauria de retallar l'últim token abans de passar-lo al model. Té sentit i guess
-
-        # Es treu l'últim token de cada text de cada usuari
-
-        # pq es treu la última posició de text???? Només s'intenta predir l'últim token en el train?
-        # És com si li passessin tot el text sencer, es treu NOMÉS l'últim token i s'intenta predir
-        # l'últim token sense donar-li òbviament al model i tenint tots els anteriors ja donats
-
-        # crec que és com si treguessis l'últim token i llavors l'intentes predir?
-        # print('here the text thing is', text.shape)
-        # print(text)
-
-        # ojo que si modifico el text in place i després ho uso des de batch aleshores no estarà modificat!
-        # possiblent no hauria de passar directament el real a la loss_fn, sinó només les coses que li calen.
-        # Així seria més net i s'entendria més tot
-
-        #predicted = model(user, item, text) # no s'usa el rating pel train
-        # HERE WAS USING THE BATCH. WRONG USE THE NEEDED THINGS ONLY INSTEAD
         
         
     return (total_losses / len(dataloader.dataset)).tolist()
 
 
+# wait ara mateix a l'època 2 ja hi ha hagut un overfit? kinda strange que entreni tant ràpid no?
+# hauria de guardar totes les dades importants de l'entrenament en un json crec
 def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader, epochs, endure_times, \
           device, model_path, rating_reg):
 
-    # print("it's computing the loss for the validation set")
-    # print("li estic passant la loss_fn del model")
-    # Hi ha hagut aquí un leakage
     val_losses = test(val_dataloader, model, loss_fn, device)
-    # print("it finished computing the loss for the validation set")
     real_loss = val_losses[3]  # real_loss for the Gradient Descent
 
     if epochs == 0:
@@ -145,6 +98,7 @@ def train(model, loss_fn, optimizer, scheduler, train_dataloader, val_dataloader
     
 
 
+# Hauria de treure els arguments no rellevants per mi, pq el train.py -h és massa llarg
 def parse_arguments():
 
     # Potser hauria de separar més entre hiperparàmetres del model i hiperparàmetres de l'entrenament
@@ -258,9 +212,6 @@ if __name__ == "__main__":
     nuser = len(data.user_dict)
     nitem = len(data.item_dict)
 
-    print('tgt_len', tgt_len)
-    print('ntokens', ntokens)
-
     # here i use by default the PETER mask so that i don't have to call it with --peter_mask always
     mymodel = PETER(not args.left_to_right_mask, src_len, tgt_len, nuser, nitem, ntokens, args.emsize,
                     args.nhead, args.nhid, args.nlayers, args.dropout, data.token_dict.bos,
@@ -269,21 +220,6 @@ if __name__ == "__main__":
     ###############################################################################
     # Training code
     ###############################################################################
-
-    # variables de args: context_reg, text_reg, rating_red
-    # peter_loss = lambda predicted, real: loss(predicted, real, args.context_reg, args.text_reg, args.rating_reg,
-    #                                           mytext_criterion, myrating_criterion, ntokens, tgt_len)
-    
-    # # Per si necessito fer prints a mitges only. Només posa els arguments de args
-    # ara doncs he de canviar la loss_function
-    # def peter_loss(predicted, real):
-    #     return loss(predicted, real, args.context_reg, args.text_reg, args.rating_reg, 
-    #                 mytext_criterion, myrating_criterion, ntokens, tgt_len)
-    
-
-    # he de posar ja els paràmetres extra bé i no com a globals directament
-    # args.context_reg, text_reg, rating_reg
-    # also el text_criterion i el rating_criterion!
 
     text_criterion = nn.NLLLoss(ignore_index=data.token_dict.pad)  # ignore the padding when computing loss
     rating_criterion = nn.MSELoss()

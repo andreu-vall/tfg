@@ -87,30 +87,24 @@ def generate_batch(model:nn.Module, bos_idx, max_length, num_beams, do_sample, u
 
 
 
-# Què estava rent?
-
 # Auxiliar, ho crida per cada batch i junta els resultats
 def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_sample):
 
     results, metrics = [], []
 
-    for batch in tqdm.tqdm(dataloader):
+    for batch in tqdm.tqdm(dataloader, mininterval=1):
 
         batch = [elem.to(device) for elem in batch] # moure a cuda
 
         user, item, rating, text = batch # en el generate no es transposa el text
         batch_size = user.size(0)
 
-        # sembla que tarda uns 2 min a generar text amb context_window = 15 amb greedy pel test
-
         # falta posar el paràmetre de la longitud a generar, que ha de ser probablement més petita que la context_window.
         # De fet podria ser més llarga però llavors s'oblidaria del que ha dit ell mateix i seria possiblement kinda stupid
 
         # it's predicted using: user & item only (not using the real rating, the real text or the real context)
         predicted = generate_batch(model, data.token_dict.bos, data.context_window, num_beams, do_sample, user, item, device)
-        # el bo aquest anterior d'abans
-        #predicted = generate_batch(data, dataloader, model, device, strategy)
-        # predicted = model.generate(data.context_window, num_beams=1, do_sample=False, user=user, item=item, device=device)
+        
         predicted_rating, predicted_context, predicted_text = predicted
   
         decoded_user = [data.user_decode(u) for u in user]
@@ -122,17 +116,8 @@ def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_samp
         decoded_predicted_context = [data.text_decode(list(c), mode='literal') for c in predicted_context]
         untokenized_predicted_context = [data.untokenize(c) for c in decoded_predicted_context]
 
-        # sembla q tmb cal raw pq sinó peta? he entrenat ara 3 èpoques
-        # Els <bos> sí que els posa, però el <eos> sembla que de moment no el posa sovint. De fet el <bos> potser el posa el model en sí
-        # Potser predir l'últim token és estúpid, pq és either <eos> o <pad>, igual que el primer que és sempre <bos>
-        # Entrenat 5 èpoques en el summary sí que ja ha après a posar el <bos> i <eos>
-        # entrenant 1 època això (ense el raw=True) peta
-        decoded_predicted_text = [data.text_decode(list(t), mode='sceptic') for t in predicted_text] # , raw=True
+        decoded_predicted_text = [data.text_decode(list(t), mode='sceptic') for t in predicted_text]
         untokenized_predicted_text = [data.untokenize(t) for t in decoded_predicted_text]
-
-        # wait ara no estic passant res manualment a cpu??
-
-        # Bruh amb 1 època només m'està generant absolutament tot <bos> xD
 
         for i in range(batch_size):
             results.append({
