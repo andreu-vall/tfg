@@ -6,10 +6,10 @@ import json
 import tqdm
 from torch.utils.data import DataLoader, Subset
 
-from utils.peter import now_time, root_mean_square_error, mean_absolute_error
-from data import MyDataset, MySplitDataset, record_execution
+from utils.peter import now_time
+from data import MyDataset, MySplitDataset, record_execution, generate_batch_results, get_RMSE_MAE
 from losses import peter_loss
-from generate import get_topk_tokens
+from generate import get_topk_tokens, compute_text_quality
 
 
 # en el case de save_results necessito el data per fer desencriptacions
@@ -19,7 +19,7 @@ def test(dataloader:DataLoader, model, loss_fn, device, save_results=False, data
 
     if save_results:
         assert data is not None
-        results = [] # crec que voldré guardar més coses?
+        results, metrics = [], []
 
     total_losses = torch.zeros(4)
     
@@ -82,14 +82,42 @@ def test(dataloader:DataLoader, model, loss_fn, device, save_results=False, data
             
             # Hi ha moltes coses que són exactament igual que al generate, possiblement hauria de no duplicar codi si és possible
 
-            decoded_user = [data.user_decode(u) for u in user]
-            decoded_item = [data.item_decode(i) for i in item]
+            # Tècnicament és una mica fals els resultats generats així, pq el que està utilitzant en cada step és el text real
+            # i només prediu 1 token més.
+            
+            #from generate import generate_batch_results # l'hauria de posar en algun lloc auxiliar? pq no és del generate only
+            
+
+            # em falten 2 coses només, el predicted_text i el predicted_context, que ho he de fer manualment jo;
+
+            # hauria de ser un mètode del model o és una cosa estranya això?
 
             max_length = data.context_window
             predicted_context = get_topk_tokens(log_context_dis, topk=max_length)
 
-            decoded_predicted_context = [data.text_decode(list(c), mode='literal') for c in predicted_context]
-            untokenized_predicted_context = [data.untokenize(c) for c in decoded_predicted_context]
+            # Aquí he descofificat de manera greedy jo manualment les paraules del model:
+            word_prob = log_word_prob.exp() # [6, 128, 9994]
+            word_idx = torch.argmax(word_prob, dim=2) # [6, 128]
+            # falta posar-li el <bos>, que ja s'ha suposat que el tindria i s'ha predit les següents posicions
+            bos_value = data.token_dict.bos
+            bos_tensor = torch.full((1, batch_size), bos_value)
+            predicted_text = torch.cat([bos_tensor, word_idx.cpu()], 0).T
+
+            # millor que provi si funciona ara?
+            batch_results, batch_metrics = generate_batch_results(
+                user, item, rating, text, predicted_rating, predicted_context, predicted_text, data)
+
+            results.extend(batch_results)
+            metrics.extend(batch_metrics)
+
+            # input d'aquí: user, item, text; (max_length), log_context_dis, log_word_prob (aquests 2 els constr jo), predicted_rating (igual)
+            # output: tmb els results
+
+            # decoded_user = [data.user_decode(u) for u in user]
+            # decoded_item = [data.item_decode(i) for i in item]
+
+            # decoded_predicted_context = [data.text_decode(list(c), mode='literal') for c in predicted_context]
+            # untokenized_predicted_context = [data.untokenize(c) for c in decoded_predicted_context]
 
 
             # en el generate: predicted_rating, predicted_context, predicted_text = predicted,
@@ -97,7 +125,7 @@ def test(dataloader:DataLoader, model, loss_fn, device, save_results=False, data
             # en canvi aquí: log_word_prob, log_context_dis, predicted_rating, attns = predicted
 
             # el predicted_text venia de allí: predicted_rating, predicted_context, predicted_text = predicted 
-            log_word_prob, log_context_dis, predicted_rating, _ = predicted # això és el que retorna el model
+           # log_word_prob, log_context_dis, predicted_rating, _ = predicted # això és el que retorna el model # this is repeated?!
             # predicted = model(user, item, text) JO estic avaluant el meu forward directament.
             # En el altre lloc venia de més alt nivell, 
 
@@ -122,37 +150,29 @@ def test(dataloader:DataLoader, model, loss_fn, device, save_results=False, data
 
             # LOL al final el que s'optimitza del text només és un classificador de les probabilitats de les paraules
 
-            # Aquí he descofificat de manera greedy jo manualment les paraules del model:
-            word_prob = log_word_prob.exp() # [6, 128, 9994]
-            word_idx = torch.argmax(word_prob, dim=2) # [6, 128]
+            
 
-            # falta posar-li el <bos>, que ja s'ha suposat que el tindria i s'ha predit les següents posicions
-            bos_value = data.token_dict.bos
-            bos_tensor = torch.full((1, batch_size), bos_value)
-            predicted_text = torch.cat([bos_tensor, word_idx.cpu()], 0).T
+            # decoded_predicted_text = [data.text_decode(list(t), mode='sceptic') for t in predicted_text] # , raw=True
+            # untokenized_predicted_text = [data.untokenize(t) for t in decoded_predicted_text]
 
-            decoded_predicted_text = [data.text_decode(list(t), mode='sceptic') for t in predicted_text] # , raw=True
-            untokenized_predicted_text = [data.untokenize(t) for t in decoded_predicted_text]
-
-            decoded_text = [data.text_decode(list(t), mode='correct') for t in text]
-            untokenized_text = [data.untokenize(t) for t in decoded_text]
+            # decoded_text = [data.text_decode(list(t), mode='correct') for t in text]
+            # untokenized_text = [data.untokenize(t) for t in decoded_text]
 
             # real_text: text.T -> decoded_text -> untokenized_text
             # predicted_text: predicted_text -> decoded_predicted_text -> untokenized_predicted_text (seems correct?)
 
             # tècnicament pel test es podria usar sampling enlloc de tot greedy? o llavors no tindria tant sentit?
 
-            if save_results:
-                for i in range(batch_size):
-                    results.append({
-                        'user': decoded_user[i],
-                        'item': decoded_item[i],
-                        'predicted_rating': predicted_rating[i].item(),
-                        'real_rating': rating[i].item(),
-                        'predicted_context': untokenized_predicted_context[i],
-                        'predicted_text': untokenized_predicted_text[i],
-                        'real_text': untokenized_text[i]
-                    })
+            # for i in range(batch_size):
+            #     results.append({
+            #         'user': decoded_user[i],
+            #         'item': decoded_item[i],
+            #         'predicted_rating': predicted_rating[i].item(),
+            #         'real_rating': rating[i].item(),
+            #         'predicted_context': untokenized_predicted_context[i],
+            #         'predicted_text': untokenized_predicted_text[i],
+            #         'real_text': untokenized_text[i]
+            #     })
 
             # Quan ho vaig fer directe vaig tenir un munt de problemes amb memòria GPU i memòria RAM:
             # # LOL aquesta 1 línia m'ha portat un munt de problemes
@@ -172,7 +192,7 @@ def test(dataloader:DataLoader, model, loss_fn, device, save_results=False, data
     if not save_results:
         return losses_dic # seria millor tornar un results buit? no crec
     
-    return losses_dic, results
+    return losses_dic, results, metrics
 
 
 # Combinar els arguments amb els de train, pq hi ha moltes coses que es necessitaven de train
@@ -202,12 +222,10 @@ if __name__ == "__main__":
     args = parse_arguments()
 
     path = os.path.join('out', args.train_id)
-
     record_execution(path)
 
-    if torch.cuda.is_available():
-        if args.cpu:
-            print(now_time() + 'WARNING: You have a CUDA device, so you should probably run without --cpu')
+    if torch.cuda.is_available() and args.cpu:
+        print(now_time() + 'WARNING: You have a CUDA device, so you should probably run without --cpu')
     mydevice = torch.device('cuda' if not args.cpu else 'cpu')
 
     model_path = os.path.join(path, 'model.pt')
@@ -230,24 +248,27 @@ if __name__ == "__main__":
         loss_input, loss_output, text_criterion, rating_criterion,
         args.context_reg, args.text_reg, args.rating_reg, ntokens, tgt_len
     )
+    # potser tindria més sentit fer les descoficacions a fora? not sure
     # Aquí en el test sí que passo el data ara mateix per fer descodificacions. en canvi en el train no el passava
     # Per caluclar el MAE i el RMSE necessito els valors predits a part de les losses
-    losses_dic, results = test(mytest_dataloader, mymodel, myloss_fn, mydevice, save_results=True, data=mydata)
+    losses_dic, results, metrics = test(mytest_dataloader, mymodel, myloss_fn, mydevice, save_results=True, data=mydata)
+    # test fent el save_results, en tokenizer-bert-base-uncased window_size=5: 42s (només cal tenir en compte per no fer-ho quan no cal)
+    # el mateix sense fer el save_results: 5s
 
-    rating_predictions = [result['predicted_rating'] for result in results]
-    real_ratings = [result['real_rating'] for result in results]
-    real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, rating_predictions)]
 
-    RMSE = root_mean_square_error(real_predicted_rating, mydata.max_rating, mydata.min_rating)
-    MAE = mean_absolute_error(real_predicted_rating, mydata.max_rating, mydata.min_rating)
+    
+    RMSE, MAE = get_RMSE_MAE(results, mydata.max_rating, mydata.min_rating)
 
-    metrics = {
+    text_quality = compute_text_quality(metrics)
+
+    metrics_json = {
         "losses": losses_dic,
         "RMSE": RMSE,
-        "MAE": MAE
+        "MAE": MAE,
+        "text_quality": text_quality
     }
     results_json = {
-        "metrics": metrics,
+        "metrics": metrics_json,
         "results": results
     }
     with open(f"out/{args.train_id}/test.json", 'w') as f:

@@ -6,9 +6,8 @@ import torch
 import tqdm
 import torch.nn as nn
 
-from utils.peter import now_time, unique_sentence_percent, bleu_score, rouge_score
 from peter_model import PETER
-from data import MyDataset, MySplitDataset, setup_logger, record_execution
+from data import MyDataset, MySplitDataset, record_execution, generate_batch_results, compute_text_quality, get_RMSE_MAE
 
 
 # Crec que hauria de moure aquests 2 mètodes fora
@@ -88,7 +87,6 @@ def generate_batch(model:nn.Module, bos_idx, max_length, num_beams, do_sample, u
     return rating, context, text.T # millor transposar aquí ja? Crec que sí
 
 
-
 # Auxiliar, ho crida per cada batch i junta els resultats
 def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_sample):
 
@@ -102,83 +100,58 @@ def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_samp
         batch_size = user.size(0)
 
         # falta posar el paràmetre de la longitud a generar, que ha de ser probablement més petita que la context_window.
-        # De fet podria ser més llarga però llavors s'oblidaria del que ha dit ell mateix i seria possiblement kinda stupid
+        # De fet podria ser més llarga però llavors s'oblidaria del que ha dit ell mateix i seria possiblement kinda stupid?
+        # No del tot necessàriament? Potser és interessant provar-ho si és fàcil de fer-ho
 
         # it's predicted using: user & item only (not using the real rating, the real text or the real context)
         predicted = generate_batch(model, data.token_dict.bos, data.context_window, num_beams, do_sample, user, item, device)
         
         predicted_rating, predicted_context, predicted_text = predicted
-  
-        decoded_user = [data.user_decode(u) for u in user]
-        decoded_item = [data.item_decode(i) for i in item]
 
-        decoded_text = [data.text_decode(list(t), mode='correct') for t in text] # needs a list to call the .index
-        untokenized_text = [data.untokenize(t) for t in decoded_text]
+        # la diferència és que aquí les coses ja venen en forma correcta del generate_batch
+            # (return rating, context, text.T # millor transposar aquí ja? Crec que sí)
+        # input d'aquí: user, item, text; predicted_context, predicted_text (aquests 2 ja estan bé), predicted_rating
+        # output: results
 
-        decoded_predicted_context = [data.text_decode(list(c), mode='literal') for c in predicted_context]
-        untokenized_predicted_context = [data.untokenize(c) for c in decoded_predicted_context]
+        
 
-        decoded_predicted_text = [data.text_decode(list(t), mode='sceptic') for t in predicted_text]
-        untokenized_predicted_text = [data.untokenize(t) for t in decoded_predicted_text]
 
-        for i in range(batch_size):
-            results.append({
-                'user': decoded_user[i],
-                'item': decoded_item[i],
-                'predicted_rating': predicted_rating[i].item(), # cal l'item pq si no és tensor i no és serialitzable
-                'real_rating': rating[i].item(),
-                'predicted_context': untokenized_predicted_context[i], # en realitat n'hi ha més, simplement mostro els més alts
-                # real_context no té sentit pq simplement son les paraules més freqüents del text
-                'predicted_text': untokenized_predicted_text[i],
-                'real_text': untokenized_text[i]
-            })
-            # el metrics és les coses que s'utilitzaran després per calcular més mètriques. Crec que seria millor fet tot junt
-            # ngl i després ja calcularé les mètriques usant els results. i.e. no val la pena separar-ho
-            # Well crec que ho havia separat pq no volia escriure en el json: tokens_predicted_text, tokens_real_text
-            # i necessitava aquests 2 per calcular les mètriques, per això ara mateix ho tinc separat
-            metrics.append({
-                'tokens_predicted_text': decoded_predicted_text[i],
-                'tokens_real_text': decoded_text[i],
-                'predicted_text': untokenized_predicted_text[i],
-                'real_text': untokenized_text[i]
-            })
+        batch_results, batch_metrics = generate_batch_results(
+            user, item, rating, text, predicted_rating, predicted_context, predicted_text, data)
+
+        results.extend(batch_results)
+        metrics.extend(batch_metrics)
+        
+
+        # for i in range(batch_size):
+        #     results.append({
+        #         'user': decoded_user[i],
+        #         'item': decoded_item[i],
+        #         'predicted_rating': predicted_rating[i].item(), # cal l'item pq si no és tensor i no és serialitzable
+        #         'real_rating': rating[i].item(),
+        #         'predicted_context': untokenized_predicted_context[i], # en realitat n'hi ha més, simplement mostro els més alts
+        #         # real_context no té sentit pq simplement son les paraules més freqüents del text
+        #         'predicted_text': untokenized_predicted_text[i],
+        #         'real_text': untokenized_text[i]
+        #     })
+        #     # el metrics és les coses que s'utilitzaran després per calcular més mètriques. Crec que seria millor fet tot junt
+        #     # ngl i després ja calcularé les mètriques usant els results. i.e. no val la pena separar-ho
+        #     # Well crec que ho havia separat pq no volia escriure en el json: tokens_predicted_text, tokens_real_text
+        #     # i necessitava aquests 2 per calcular les mètriques, per això ara mateix ho tinc separat
+        #     metrics.append({
+        #         'tokens_predicted_text': decoded_predicted_text[i],
+        #         'tokens_real_text': decoded_text[i],
+        #         'predicted_text': untokenized_predicted_text[i],
+        #         'real_text': untokenized_text[i]
+        #     })
 
     parameters = {
         "num_beams": num_beams,
         "do_sample": do_sample
     }
-    results_json = {
-        "parameters": parameters,
-        "results": results
-    }
-    return results_json, metrics
+    return parameters, metrics, results
 
 
-
-# La qualitat del text a on l'hauria de posar?
-
-def compute_text_quality(results_metrics):
-
-    tokens_text_predicted = [result['tokens_predicted_text'] for result in results_metrics]
-    tokens_text_real = [result['tokens_real_text'] for result in results_metrics]
-    
-    # Pel BLEU necessito els tokens en la forma de llista de tokens com a string
-    # Andreu: indicar clarament que s'està fent en % (pq el BLEU és un valor entre 0 i 1 normalment)
-    BLEU1 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=1, smooth=False)
-    print(f"{now_time()}BLEU-1 {BLEU1:7.4f} %")
-    BLEU4 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=4, smooth=False)
-    print(f"{now_time()}BLEU-4 {BLEU4:7.4f} %")
-    
-    USR, USN = unique_sentence_percent(tokens_text_predicted)
-    print(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
-
-    predicted_text = [result['predicted_text'] for result in results_metrics]
-    real_text = [result['real_text'] for result in results_metrics]
-
-    # En canvi pel ROUGE necessito els texts passats a string real tot junt ja. Possiblement té més valor doncs?
-    ROUGE = rouge_score(real_text, predicted_text)  # a dictionary
-    for (k, v) in ROUGE.items():
-        print(now_time() + '{} {:7.4f}'.format(k, v))
 
 
 
@@ -236,23 +209,31 @@ if __name__ == "__main__":
     num_beams = 1
     do_sample = False
 
-    results_json, results_metrics = generate(mydata, test_dataloader, mymodel, mydevice, num_beams, do_sample)
+    parameters, metrics, results = generate(mydata, test_dataloader, mymodel, mydevice, num_beams, do_sample)
 
+    RMSE, MAE = get_RMSE_MAE(results, mydata.max_rating, mydata.min_rating)
 
-    # falta escriure les mètriques en el json. De fet aquestes mètriques tmb les podria calcular igual en el test
-    # tot i que tindrien una interpretació lleugerament diferent. Falta acabar-les de confirmar que són % la majoria
-    # i veure si puc juntar parts del codi del test i del generate
+    text_quality = compute_text_quality(metrics)
 
-
+    metrics_json = {
+        #"losses": losses_dic, # les losses crec que seria complicat calulcar-les i no tenen molt sentit en el generate
+        "RMSE": RMSE,
+        "MAE": MAE,
+        "text_quality": text_quality
+    }
+    generate_json = {
+        "parameters": parameters,
+        "metrics": metrics_json,
+        "results": results
+    }
     with open(f"out/{args.id}/results/{args.result_id}.json", 'w') as f:
-        json.dump(results_json, f, indent=4)
+        json.dump(generate_json, f, indent=4)
 
-    # millor posar les mètriques en el json tmb!
-    
-    compute_text_quality(results_metrics)
 
 
     # Demà seguiré per aquí + el test, i aviat he de començar a escriure la memòria ja...
+    # LOL la memòria. M'he de passar un dia límit a mi mateix de posar'm-hi ja en serio,
+    # o si no no entregaré el TFG aquest semestre...
 
     # it's predicted using: user & item only (not using the real rating, the real text or the real context)
 

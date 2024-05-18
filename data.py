@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, random_split
 import sys
 import logging
 
-from utils.peter import now_time
+from utils.peter import now_time, unique_sentence_percent, bleu_score, rouge_score, root_mean_square_error, mean_absolute_error
 from tokenizer import load
 
 
@@ -258,6 +258,8 @@ class MySplitDataset:
         self.train, self.valid, self.test = splits
 
 
+# on hauria de posar els utils de andreu?
+
 def setup_logger(name, log_file, stdout=False):
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
@@ -270,3 +272,95 @@ def setup_logger(name, log_file, stdout=False):
 def record_execution(path):
     history_logger = setup_logger('history_logger', f'{path}/history.log')
     history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
+
+
+
+
+def generate_batch_results(user, item, rating, text, predicted_rating, predicted_context, predicted_text, data : MyDataset):
+
+    batch_size = user.size(0)
+
+    decoded_user = [data.user_decode(u) for u in user]
+    decoded_item = [data.item_decode(i) for i in item]
+
+    decoded_text = [data.text_decode(list(t), mode='correct') for t in text] # needs a list to call the .index
+    untokenized_text = [data.untokenize(t) for t in decoded_text]
+
+    decoded_predicted_context = [data.text_decode(list(c), mode='literal') for c in predicted_context]
+    untokenized_predicted_context = [data.untokenize(c) for c in decoded_predicted_context]
+
+    decoded_predicted_text = [data.text_decode(list(t), mode='sceptic') for t in predicted_text]
+    untokenized_predicted_text = [data.untokenize(t) for t in decoded_predicted_text]
+
+    batch_results, batch_metrics = [], []
+    for i in range(batch_size):
+        batch_results.append({
+            'user': decoded_user[i],
+            'item': decoded_item[i],
+            'predicted_rating': predicted_rating[i].item(), # cal l'item pq si no és tensor i no és serialitzable
+            'real_rating': rating[i].item(),
+            'predicted_context': untokenized_predicted_context[i], # en realitat n'hi ha més, simplement mostro els més alts
+            # real_context no té sentit pq simplement son les paraules més freqüents del text
+            'predicted_text': untokenized_predicted_text[i],
+            'real_text': untokenized_text[i]
+        })
+        batch_metrics.append({
+            'tokens_predicted_text': decoded_predicted_text[i],
+            'tokens_real_text': decoded_text[i],
+            'predicted_text': untokenized_predicted_text[i],
+            'real_text': untokenized_text[i]
+        })
+    return batch_results, batch_metrics
+
+
+
+
+# this function is kinda simple
+def get_RMSE_MAE(results, max_rating, min_rating):
+
+    predicted_ratings = [result['predicted_rating'] for result in results]
+    real_ratings = [result['real_rating'] for result in results]
+
+    real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, predicted_ratings)]
+
+    RMSE = root_mean_square_error(real_predicted_rating, max_rating, min_rating)
+    MAE = mean_absolute_error(real_predicted_rating, max_rating, min_rating)
+
+    return RMSE, MAE
+    
+
+
+def compute_text_quality(results_metrics):
+
+    # les hauria de posar en un json enlloc d'imprimir-les
+    # cal tenir en compte que tarda una mica en analitzar la qualitat del text amb aquestes fórmules,
+    # no es poden executar sempre pq sí, però sí quan vull els valors
+
+    tokens_text_predicted = [result['tokens_predicted_text'] for result in results_metrics]
+    tokens_text_real = [result['tokens_real_text'] for result in results_metrics]
+    
+    # Pel BLEU necessito els tokens en la forma de llista de tokens com a string
+    # Andreu: indicar clarament que s'està fent en % (pq el BLEU és un valor entre 0 i 1 normalment)
+    BLEU1 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=1, smooth=False)
+    #print(f"{now_time()}BLEU-1 {BLEU1:7.4f} %")
+    BLEU4 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=4, smooth=False)
+    #print(f"{now_time()}BLEU-4 {BLEU4:7.4f} %")
+    
+    USR, USN = unique_sentence_percent(tokens_text_predicted)
+    #print(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
+
+    predicted_text = [result['predicted_text'] for result in results_metrics]
+    real_text = [result['real_text'] for result in results_metrics]
+
+    # En canvi pel ROUGE necessito els texts passats a string real tot junt ja. Possiblement té més valor doncs?
+    ROUGE = rouge_score(real_text, predicted_text)  # a dictionary
+    # for (k, v) in ROUGE.items():
+    #     print(now_time() + '{} {:7.4f}'.format(k, v))
+
+    return {
+        'BLEU-1': BLEU1,
+        'BLEU-4': BLEU4,
+        'USR': USR,
+        'USN': USN,
+        'ROUGE': ROUGE
+    }

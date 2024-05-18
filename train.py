@@ -215,9 +215,8 @@ if __name__ == "__main__":
     nitem = len(data.item_dict)
 
     # here i use by default the PETER mask so that i don't have to call it with --peter_mask always
-    mymodel = PETER(src_len, tgt_len, nuser, nitem, ntokens, args.emsize,
-                    args.nhead, args.nhid, args.nlayers, args.dropout, data.token_dict.bos,
-                    data.token_dict.eos, data.token_dict.pad, data.token_dict.unk).to(mydevice)
+    mymodel = PETER(src_len, tgt_len, nuser, nitem, ntokens, args.emsize, args.nhead, args.nhid,
+                    args.nlayers, args.dropout, data.token_dict.pad).to(mydevice)
 
     ###############################################################################
     # Training code

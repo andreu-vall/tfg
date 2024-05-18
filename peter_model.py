@@ -17,8 +17,7 @@ from utils.module import PositionalEncoding, TransformerEncoderLayer, Transforme
 
 class PETER(nn.Module):
     # Crec que aquí hi ha masses arguments?
-    def __init__(self, src_len, tgt_len, nuser, nitem, ntoken, emsize,
-                 nhead, nhid, nlayers, dropout, bos_idx, eos_idx, pad_idx, unk_idx):
+    def __init__(self, src_len, tgt_len, nuser, nitem, ntoken, emsize, nhead, nhid, nlayers, dropout, pad_idx):
         super(PETER, self).__init__()
         self.pos_encoder = PositionalEncoding(emsize, dropout)  # emsize: word embedding size
 
@@ -44,26 +43,27 @@ class PETER(nn.Module):
         self.hidden2token = nn.Linear(emsize, ntoken)
         self.recommender = MLP(emsize)
 
+        # quina diferència hi ha amb ui_len???
+        # src_len, s'usa per: crear màscara atenció (de src_len + tgt_len), en el predict_seq per saber a partir de on es descodificaran tokens
+        # tgt_len, s'usa per: crear màscara atenció (de src_len + tgt_len) i ja està!!!!!
+        # LOL pràcticament només li crees la màscara d'atenció i el torch transformers ja t'ho fan tot xD
+
         # should this work with indices or with entities??? i'm not sure
         # i think with indicies as the embeddings work with indices
 
-        self.bos_idx = bos_idx
-        self.eos_idx = eos_idx
-        self.pad_idx = pad_idx
-        self.unk_idx = unk_idx
-
         self.ui_len = 2
-        self.src_len = src_len
+        self.src_len = src_len # source_length, és sempre 2 pq el que tinc sempre (source) és 2: user i item
+        # tgt_len target_length, la longitud del que vull predir, només ho usen per crear la màscara i ja!
         self.pad_idx = pad_idx
         self.emsize = emsize
 
         # Encara he de mirar lo de les màscares. Aviam ja no es dirà aquest fitxer peter.py
 
         # LES 2 COSES QUE S'UTILITZEN PER CREAR LA MÀSCARA: src_len i tgt_len
-        print('src_len is', src_len)
-        print('tgt_len is', tgt_len)
+        print('src_len is', src_len) # 2 always
+        print('tgt_len is', tgt_len) # 6 (context_window +1?)
 
-        #1234 tret un  + 1
+        # Damn
         self.attn_mask = PETER.generate_andreu_mask(src_len + tgt_len) # el +1 és pq ells tenien els paràmetres mal?
         
         # if peter_mask: # Crec que hauria de començar ja a tocar les màscares d'atenció, i sobretot hauria ja
@@ -78,10 +78,9 @@ class PETER(nn.Module):
         #     assert False
         #     self.attn_mask = generate_square_subsequent_mask(src_len + tgt_len)
         #     print("ups, era en square???")
-        
-        
 
         self.init_weights()
+
 
     @staticmethod
     def generate_andreu_mask(size):
@@ -92,8 +91,8 @@ class PETER(nn.Module):
 
 
     def init_weights(self):
-        initrange = 0.1
-        self.user_embeddings.weight.data.uniform_(-initrange, initrange)
+        initrange = 0.1 # aquí es podria plantejar de inicar els token embeddings pre-entrenats d'un altre model
+        self.user_embeddings.weight.data.uniform_(-initrange, initrange) # o inclús del mateix entrenat per un altre dataset
         self.item_embeddings.weight.data.uniform_(-initrange, initrange)
         self.token_embeddings.weight.data.uniform_(-initrange, initrange)
         self.hidden2token.weight.data.uniform_(-initrange, initrange)
@@ -108,12 +107,17 @@ class PETER(nn.Module):
         rating = self.recommender(hidden[0])  # (batch_size,)
         return rating
 
+    # en realitat aquesta funció és pràcticament el mateix. La única diferència és que en la 2a no importa tota la
+    # resta i només vols el que et dona la última hidden, la qual he vist que era de mida variable
     def predict_seq(self, hidden):
         word_prob = self.hidden2token(hidden[self.src_len:])  # (tgt_len, batch_size, ntoken)
         log_word_prob = func.log_softmax(word_prob, dim=-1)
         return log_word_prob
 
     def generate_token(self, hidden):
+        # print('generate_token, right now hidden has shape', hidden.shape) # [3, 128, 512] oh it do seems to be adapted?
+        # # [?, batch_size, emsize]
+        # assert False
         word_prob = self.hidden2token(hidden[-1])  # (batch_size, ntoken)
         log_word_prob = func.log_softmax(word_prob, dim=-1)
         return log_word_prob
@@ -133,34 +137,19 @@ class PETER(nn.Module):
         :return attns: (nlayers, batch_size, total_len, total_len)
         '''
 
-        # Entendre aquesta funció és entendre exactament que estan fent a PETER
-        # Ja que he invertit tant temps en el PETER, òbviament hauria d'entendre això,
-        # pq el meu TFG consistirà exactament en explicar això que se suposa que hauria
-        # d'haver entès i dominat molt bé
-
-        # Aquí s'agafa el deivce de les dades, però evidentment les dades i el model han d'estar en el mateix device
-
-        # Hauria de veure ara en detall aquesta funció i simplificar-la i eliminar paràmetres
-
         device = user.device
         batch_size = user.size(0)
-        # ojo he canviat la línia posterior a aquesta i crec que estic tenint problemes amb les transposicions en general
 
-        # Sembla que la màscara depèn de quan text has generat ja i estàs passant-lo doncs pels paràmetres
-
+        # self.ui_len = 2
+        # text.size(0) mira quants tokens tens de l'input ja generats
+        # per tant total_len és la suma de les coses pots mirar en qualsevol punt (perquè més endvant no tindria sentit mirar si no tens)
         total_len = self.ui_len + text.size(0)  # deal with generation when total_len != src_len + tgt_len
         # see nn.MultiheadAttention for attn_mask and key_padding_mask
 
-        # Totes les coses que venen de input pots atendre a elles
-
-        # Sembla que l'atenció és exactament per les coses que ja hi ha generades fins ara,
-        # i possiblement amb un sol step es generi totes les paraules indepdendentment del template
-        # de fixed size a generar, l'únic que després pq hi hagi consistència entre el text generat
-        # el que es va fent es una estratègia de decoding, on la més simple que usaven en PETER
-        # és anar en cada step simplement generant una paraula més, la més probable fins on havies
-        # generat fins ara amb una més la que afegeixes ara
+        # La màscara d'atenció és per dir-li a totes les coses que hi ha generades fins ara, a quines pot atendre en cada punt
         attn_mask = self.attn_mask[:total_len, :total_len].to(device)  # (total_len, total_len)
 
+        # crec que la key_padding_mask bàscicament serviex per dir-li que no es fixi en els paddings per fer cap càlcul?
         left = torch.zeros(batch_size, self.ui_len).bool().to(device)  # (batch_size, ui_len)
         right = text.t() == self.pad_idx  # replace pad_idx with True and others with False, (batch_size, total_len - ui_len)
         key_padding_mask = torch.cat([left, right], 1)  # (batch_size, total_len)
@@ -217,13 +206,6 @@ class PETER(nn.Module):
         if seq_prediction:
             log_word_prob = self.predict_seq(hidden)  # (tgt_len, batch_size, ntoken)
 
-
-        # És possible que això causi problemes el fet de fer-ho així?
-        # De moment hi havia coses que veia estranyes i les he provat i he vist que l'alternativa no sol ser pas millor,
-        # però anar veient coses així és divertit i entenc pq ho han fet ells així (la justificació)
-        
-        # utilitza NOMÉS l'últim hidden token per genera 1 únic token més
-        else: # no acabo d'entendre quin sentit té fer-ho així quan només vols generar 1 token, pq l'entrenament no ha après pas així
-            # segons el que entenc jo
+        else: # La qüestió és que la mida de hidden va canviant!
             log_word_prob = self.generate_token(hidden)  # (batch_size, ntoken)
         return log_word_prob, log_context_dis, rating, attns
