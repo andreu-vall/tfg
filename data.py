@@ -276,16 +276,16 @@ def record_execution(path):
 
 
 
-def generate_batch_results(user, item, rating, text, predicted_rating, predicted_context, predicted_text, data : MyDataset):
+def decode_batch_results(user, item, rating, text, predicted_rating, predicted_context, predicted_text, data : MyDataset):
 
     batch_size = user.size(0)
 
     decoded_user = [data.user_decode(u) for u in user]
     decoded_item = [data.item_decode(i) for i in item]
-
     decoded_text = [data.text_decode(list(t), mode='correct') for t in text] # needs a list to call the .index
     untokenized_text = [data.untokenize(t) for t in decoded_text]
 
+    # context: predir les possibles paraules de tot el text en qualsevol ordre
     decoded_predicted_context = [data.text_decode(list(c), mode='literal') for c in predicted_context]
     untokenized_predicted_context = [data.untokenize(c) for c in decoded_predicted_context]
 
@@ -300,9 +300,10 @@ def generate_batch_results(user, item, rating, text, predicted_rating, predicted
             'predicted_rating': predicted_rating[i].item(), # cal l'item pq si no és tensor i no és serialitzable
             'real_rating': rating[i].item(),
             'predicted_context': untokenized_predicted_context[i], # en realitat n'hi ha més, simplement mostro els més alts
-            # real_context no té sentit pq simplement son les paraules més freqüents del text
+            # real_context: no té sentit pq simplement son les paraules més freqüents del text
             'predicted_text': untokenized_predicted_text[i],
             'real_text': untokenized_text[i]
+            # Quan vaig copiar vectors directe vaig tenir un munt de problemes amb memòria GPU i memòria RAM:
         })
         batch_metrics.append({
             'tokens_predicted_text': decoded_predicted_text[i],
@@ -313,9 +314,6 @@ def generate_batch_results(user, item, rating, text, predicted_rating, predicted
     return batch_results, batch_metrics
 
 
-
-
-# this function is kinda simple
 def get_RMSE_MAE(results, max_rating, min_rating):
 
     predicted_ratings = [result['predicted_rating'] for result in results]
@@ -332,30 +330,20 @@ def get_RMSE_MAE(results, max_rating, min_rating):
 
 def compute_text_quality(results_metrics):
 
-    # les hauria de posar en un json enlloc d'imprimir-les
-    # cal tenir en compte que tarda una mica en analitzar la qualitat del text amb aquestes fórmules,
-    # no es poden executar sempre pq sí, però sí quan vull els valors
-
     tokens_text_predicted = [result['tokens_predicted_text'] for result in results_metrics]
     tokens_text_real = [result['tokens_real_text'] for result in results_metrics]
     
     # Pel BLEU necessito els tokens en la forma de llista de tokens com a string
-    # Andreu: indicar clarament que s'està fent en % (pq el BLEU és un valor entre 0 i 1 normalment)
-    BLEU1 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=1, smooth=False)
-    #print(f"{now_time()}BLEU-1 {BLEU1:7.4f} %")
+    BLEU1 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=1, smooth=False) # són en %
     BLEU4 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=4, smooth=False)
-    #print(f"{now_time()}BLEU-4 {BLEU4:7.4f} %")
     
     USR, USN = unique_sentence_percent(tokens_text_predicted)
-    #print(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
 
     predicted_text = [result['predicted_text'] for result in results_metrics]
     real_text = [result['real_text'] for result in results_metrics]
 
     # En canvi pel ROUGE necessito els texts passats a string real tot junt ja. Possiblement té més valor doncs?
     ROUGE = rouge_score(real_text, predicted_text)  # a dictionary
-    # for (k, v) in ROUGE.items():
-    #     print(now_time() + '{} {:7.4f}'.format(k, v))
 
     return {
         'BLEU-1': BLEU1,

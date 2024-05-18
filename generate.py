@@ -7,7 +7,7 @@ import tqdm
 import torch.nn as nn
 
 from peter_model import PETER
-from data import MyDataset, MySplitDataset, record_execution, generate_batch_results, compute_text_quality, get_RMSE_MAE
+from data import MyDataset, MySplitDataset, record_execution, decode_batch_results, compute_text_quality, get_RMSE_MAE
 
 
 # Crec que hauria de moure aquests 2 mètodes fora
@@ -35,60 +35,39 @@ def generate_batch(model:nn.Module, bos_idx, max_length, num_beams, do_sample, u
     assert do_sample==False, "only greedy generation for now" # és una mica estrany el format ngl
 
     batch_size = user.size(0)
-
     # Comencem amb tot <bos> i anirem afegint paraules iterativament
     text = torch.full((1, batch_size), bos_idx).to(device)
+    # PETER: text = torch.tensor(self.bos_idx).repeat(batch_size, 1).t()  # (src_len - 1, batch_size)
     
     user = user.to(device)
     item = item.to(device)
 
-    # # sembla que en el PETER, el primer text és torch.Size([1, 128]) amb tot start_idx
-    # # el següents es va afegint una dimensió més amb les paraules greedy descodificades per cadascú
-
-    # # PETER: size (src_len - 1, batch_size)
-    # # should it already be of all the size and only edit parts of it?
-    # text = torch.tensor(self.bos_idx).repeat(batch_size, 1).t()  # (src_len - 1, batch_size)
-    #print('text shape', text.shape)
-
-    #text = torch.tensor(self.bos_idx) # ara mateix no tinc el beggining of sequence aquí
-    # li hauré de canviar la shape?
-
-    # ojo que això és bastant del copilot encara
-
-    # A la step 0 es calcula la predicció de context i de rating
-    # Greedy: a tots els steps, inclòs el 0, es calcula el següent token més probable del text. S'havia començat amb el <bos>
-
-    # tindria sentit anar ajustant la predicció dels ratings i context en cada step? Crec que no, perquè la cosa és que les
-    # generes això en primer lloc i després vas generant el text a poc a poc amb la idea de en base de això hauria de ser
-
-    # És necessari executar el model max_length cops, perquè l'únic que sap fer el model és predir exactament 1 token més
-    # a partir de tot el que ja sap, i si no sap res doncs necessitarà max_length cops per generar el text de la longitud
-    # que vulguis
-
-    # aquesta funció encara no he tocat gaires coses, és la traducció més llegible del codi de PETER,
-    # encara no he canviat la estratègia de res
-
     for step in range(max_length):
-        if step == 0: # step 0: es calcula el rating, el context i el 1r token
-            log_word_prob, log_context_dis, rating, _ = model(user, item, text, False) # el forward del model
-            context = get_topk_tokens(log_context_dis, topk=max_length)
-        else: # step > 0: se li introdueix el seu text que havia generat fins ara i es NOMÉS el següent token
-            # tècnicament el model també torna a calcular una altra predicció de context i rating però s'ignora,
-            # perquè el que importa aquí és generar un text llarg de manera autoregressiva
-            log_word_prob, _, _, _ = model(user, item, text, False, False, False) # el forward del model
-        # print('step', step)
-        # print('here, log_word_prob shape is', log_word_prob.shape)
-        _, next_token = torch.max(log_word_prob, dim=-1)
-        # print('and the next token shape is', next_token.shape)
-        # if step == 1:
-        #     assert(False)
-        text = torch.cat([text, next_token.unsqueeze(0)], 0) # aquí és on es concatena
 
-    return rating, context, text.T # millor transposar aquí ja? Crec que sí
+        # step 0: es calcula el rating, el context i el 1r token (a partir de <bos>)
+        if step == 0:
+            log_word_prob, log_context_dis, rating, _ = model(user, item, text, False)
+            context = get_topk_tokens(log_context_dis, topk=max_length)
+        
+        # step > 0: se li introdueix el seu text que havia generat fins ara i genera 1 token més
+        else:
+            log_word_prob, _, _, _ = model(user, item, text, False, False, False)
+        
+        _, next_token = torch.max(log_word_prob, dim=-1) # greedy
+        text = torch.cat([text, next_token.unsqueeze(0)], 0)
+
+    return rating, context, text.T
 
 
 # Auxiliar, ho crida per cada batch i junta els resultats
-def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_sample):
+def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_sample, target_length):
+
+    if target_length is None: # potser hauria d'adclarir en execució script que si no s'pesecifica s'usa la shape del model
+        target_length = data.context_window
+    else:
+        assert target_length <= data.context_window, "target_length should be less or equal to the context_window"
+        # technically it could be less, but then the model would "forget" what it has said itself, because it doesn't
+        # have the capacity to process such a long input in it's architecture
 
     results, metrics = [], []
 
@@ -96,54 +75,22 @@ def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_samp
 
         batch = [elem.to(device) for elem in batch] # moure a cuda
 
-        user, item, rating, text = batch # en el generate no es transposa el text
-        batch_size = user.size(0)
+        user, item, rating, text = batch # en el generate NO es transposa el text
 
         # falta posar el paràmetre de la longitud a generar, que ha de ser probablement més petita que la context_window.
         # De fet podria ser més llarga però llavors s'oblidaria del que ha dit ell mateix i seria possiblement kinda stupid?
         # No del tot necessàriament? Potser és interessant provar-ho si és fàcil de fer-ho
 
-        # it's predicted using: user & item only (not using the real rating, the real text or the real context)
-        predicted = generate_batch(model, data.token_dict.bos, data.context_window, num_beams, do_sample, user, item, device)
+        # it's predicted using: user & item only (not using the rating nor the text)
+        predicted = generate_batch(model, data.token_dict.bos, target_length, num_beams, do_sample, user, item, device)
         
         predicted_rating, predicted_context, predicted_text = predicted
 
-        # la diferència és que aquí les coses ja venen en forma correcta del generate_batch
-            # (return rating, context, text.T # millor transposar aquí ja? Crec que sí)
-        # input d'aquí: user, item, text; predicted_context, predicted_text (aquests 2 ja estan bé), predicted_rating
-        # output: results
-
-        
-
-
-        batch_results, batch_metrics = generate_batch_results(
+        batch_results, batch_metrics = decode_batch_results(
             user, item, rating, text, predicted_rating, predicted_context, predicted_text, data)
 
         results.extend(batch_results)
         metrics.extend(batch_metrics)
-        
-
-        # for i in range(batch_size):
-        #     results.append({
-        #         'user': decoded_user[i],
-        #         'item': decoded_item[i],
-        #         'predicted_rating': predicted_rating[i].item(), # cal l'item pq si no és tensor i no és serialitzable
-        #         'real_rating': rating[i].item(),
-        #         'predicted_context': untokenized_predicted_context[i], # en realitat n'hi ha més, simplement mostro els més alts
-        #         # real_context no té sentit pq simplement son les paraules més freqüents del text
-        #         'predicted_text': untokenized_predicted_text[i],
-        #         'real_text': untokenized_text[i]
-        #     })
-        #     # el metrics és les coses que s'utilitzaran després per calcular més mètriques. Crec que seria millor fet tot junt
-        #     # ngl i després ja calcularé les mètriques usant els results. i.e. no val la pena separar-ho
-        #     # Well crec que ho havia separat pq no volia escriure en el json: tokens_predicted_text, tokens_real_text
-        #     # i necessitava aquests 2 per calcular les mètriques, per això ara mateix ho tinc separat
-        #     metrics.append({
-        #         'tokens_predicted_text': decoded_predicted_text[i],
-        #         'tokens_real_text': decoded_text[i],
-        #         'predicted_text': untokenized_predicted_text[i],
-        #         'real_text': untokenized_text[i]
-        #     })
 
     parameters = {
         "num_beams": num_beams,
@@ -153,15 +100,13 @@ def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_samp
 
 
 
-
-
-
 # Join cmd arguments and the arguments saved previously from the training
 def parse_arguments():
     cmd_parser = argparse.ArgumentParser(description='Generate')
     cmd_parser.add_argument('id', type=str, help='model id')
     cmd_parser.add_argument('strategy', type=str, choices=['greedy'], help='decoding strategy')
     cmd_parser.add_argument('result_id', type=str, help='result id')
+    cmd_parser.add_argument('--target_length', type=int, help='target length') # should be optative and default the context_window?
     cmd_parser.add_argument('--cpu', action='store_true', help='don\'t use CUDA')
     cmd_args = cmd_parser.parse_args()
 
@@ -189,7 +134,6 @@ if __name__ == "__main__":
     args = parse_arguments()
     
     path = os.path.join('out', args.id)
-
     record_execution(path)
 
     mydevice = torch.device('cuda' if not args.cpu else 'cpu')
@@ -209,7 +153,7 @@ if __name__ == "__main__":
     num_beams = 1
     do_sample = False
 
-    parameters, metrics, results = generate(mydata, test_dataloader, mymodel, mydevice, num_beams, do_sample)
+    parameters, metrics, results = generate(mydata, test_dataloader, mymodel, mydevice, num_beams, do_sample, args.target_length)
 
     RMSE, MAE = get_RMSE_MAE(results, mydata.max_rating, mydata.min_rating)
 
@@ -228,8 +172,6 @@ if __name__ == "__main__":
     }
     with open(f"out/{args.id}/results/{args.result_id}.json", 'w') as f:
         json.dump(generate_json, f, indent=4)
-
-
 
     # Demà seguiré per aquí + el test, i aviat he de començar a escriure la memòria ja...
     # LOL la memòria. M'he de passar un dia límit a mi mateix de posar'm-hi ja en serio,

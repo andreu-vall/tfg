@@ -151,12 +151,6 @@ def parse_arguments():
     parser.add_argument('--context_reg', type=float, default=1.0, help='regularization on context prediction task')
     parser.add_argument('--text_reg', type=float, default=1.0, help='regularization on text generation task')
 
-
-    # Crec que la PETER mask sempre era millor que la left-to-right mask! Seria millor usar-la per defecte
-    # tmb canvio per default la peter_mask
-    #parser.add_argument('--peter_mask', action='store_true', help='True to use peter mask; Otherwise left-to-right mask')
-    # parser.add_argument('--left_to_right_mask', action='store_true', help='True to use left-to-right mask; Otherwise peter mask')
-
     return parser.parse_args()
 
 
