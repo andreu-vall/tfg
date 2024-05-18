@@ -125,8 +125,6 @@ def parse_arguments():
     # why would I ever want to limit the vocabulary of the text, users or items? just use a simpler tokenizer then
     parser.add_argument('--text_vocab_size', type=int, help='number of tokens to keep in the text vocabulary')
 
-    # he de treure arguments i orgnaitzar millor els arguments, que la hint és massa llarga...
-
     # Paràmetres del model
     parser.add_argument('--emsize', type=int, default=512, help='size of embeddings')
     parser.add_argument('--nhead', type=int, default=2, help='the number of heads in the transformer')
@@ -157,7 +155,7 @@ def parse_arguments():
     # Crec que la PETER mask sempre era millor que la left-to-right mask! Seria millor usar-la per defecte
     # tmb canvio per default la peter_mask
     #parser.add_argument('--peter_mask', action='store_true', help='True to use peter mask; Otherwise left-to-right mask')
-    parser.add_argument('--left_to_right_mask', action='store_true', help='True to use left-to-right mask; Otherwise peter mask')
+    # parser.add_argument('--left_to_right_mask', action='store_true', help='True to use left-to-right mask; Otherwise peter mask')
 
     return parser.parse_args()
 
@@ -217,7 +215,7 @@ if __name__ == "__main__":
     nitem = len(data.item_dict)
 
     # here i use by default the PETER mask so that i don't have to call it with --peter_mask always
-    mymodel = PETER(not args.left_to_right_mask, src_len, tgt_len, nuser, nitem, ntokens, args.emsize,
+    mymodel = PETER(src_len, tgt_len, nuser, nitem, ntokens, args.emsize,
                     args.nhead, args.nhid, args.nlayers, args.dropout, data.token_dict.bos,
                     data.token_dict.eos, data.token_dict.pad, data.token_dict.unk).to(mydevice)
 

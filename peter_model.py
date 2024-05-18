@@ -9,15 +9,15 @@ import torch.nn.functional as func
 # from torch.nn import TransformerEncoder
 # en C:\Users\Andreu Vall\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\nn\modules\transformer.py
 
-from utils.module import PositionalEncoding, TransformerEncoderLayer, TransformerEncoder, MLP, \
-    generate_peter_mask, generate_square_subsequent_mask
+from utils.module import PositionalEncoding, TransformerEncoderLayer, TransformerEncoder, MLP
 
 
-# He de simplificar el codi i els arguments
+# He de simplificar el codi i els arguments. Ecara ho he de fer
+# De moment només havia mirat lo de la màscara
 
 class PETER(nn.Module):
     # Crec que aquí hi ha masses arguments?
-    def __init__(self, peter_mask, src_len, tgt_len, nuser, nitem, ntoken, emsize,
+    def __init__(self, src_len, tgt_len, nuser, nitem, ntoken, emsize,
                  nhead, nhid, nlayers, dropout, bos_idx, eos_idx, pad_idx, unk_idx):
         super(PETER, self).__init__()
         self.pos_encoder = PositionalEncoding(emsize, dropout)  # emsize: word embedding size
@@ -140,6 +140,8 @@ class PETER(nn.Module):
 
         # Aquí s'agafa el deivce de les dades, però evidentment les dades i el model han d'estar en el mateix device
 
+        # Hauria de veure ara en detall aquesta funció i simplificar-la i eliminar paràmetres
+
         device = user.device
         batch_size = user.size(0)
         # ojo he canviat la línia posterior a aquesta i crec que estic tenint problemes amb les transposicions en general
@@ -214,8 +216,14 @@ class PETER(nn.Module):
         # manera independent
         if seq_prediction:
             log_word_prob = self.predict_seq(hidden)  # (tgt_len, batch_size, ntoken)
+
+
+        # És possible que això causi problemes el fet de fer-ho així?
+        # De moment hi havia coses que veia estranyes i les he provat i he vist que l'alternativa no sol ser pas millor,
+        # però anar veient coses així és divertit i entenc pq ho han fet ells així (la justificació)
         
         # utilitza NOMÉS l'últim hidden token per genera 1 únic token més
-        else:
+        else: # no acabo d'entendre quin sentit té fer-ho així quan només vols generar 1 token, pq l'entrenament no ha après pas així
+            # segons el que entenc jo
             log_word_prob = self.generate_token(hidden)  # (batch_size, ntoken)
         return log_word_prob, log_context_dis, rating, attns

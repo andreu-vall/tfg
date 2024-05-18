@@ -66,6 +66,9 @@ def generate_batch(model:nn.Module, bos_idx, max_length, num_beams, do_sample, u
     # a partir de tot el que ja sap, i si no sap res doncs necessitarà max_length cops per generar el text de la longitud
     # que vulguis
 
+    # aquesta funció encara no he tocat gaires coses, és la traducció més llegible del codi de PETER,
+    # encara no he canviat la estratègia de res
+
     for step in range(max_length):
         if step == 0: # step 0: es calcula el rating, el context i el 1r token
             log_word_prob, log_context_dis, rating, _ = model(user, item, text, False) # el forward del model
@@ -129,6 +132,10 @@ def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_samp
                 'predicted_text': untokenized_predicted_text[i],
                 'real_text': untokenized_text[i]
             })
+            # el metrics és les coses que s'utilitzaran després per calcular més mètriques. Crec que seria millor fet tot junt
+            # ngl i després ja calcularé les mètriques usant els results. i.e. no val la pena separar-ho
+            # Well crec que ho havia separat pq no volia escriure en el json: tokens_predicted_text, tokens_real_text
+            # i necessitava aquests 2 per calcular les mètriques, per això ara mateix ho tinc separat
             metrics.append({
                 'tokens_predicted_text': decoded_predicted_text[i],
                 'tokens_real_text': decoded_text[i],
@@ -168,7 +175,7 @@ def compute_text_quality(results_metrics):
     predicted_text = [result['predicted_text'] for result in results_metrics]
     real_text = [result['real_text'] for result in results_metrics]
 
-    # En canvi pel ROUGE necessito els texts passats a string real tot junt ja. Possiblement té més valor doncs
+    # En canvi pel ROUGE necessito els texts passats a string real tot junt ja. Possiblement té més valor doncs?
     ROUGE = rouge_score(real_text, predicted_text)  # a dictionary
     for (k, v) in ROUGE.items():
         print(now_time() + '{} {:7.4f}'.format(k, v))
@@ -239,6 +246,8 @@ if __name__ == "__main__":
 
     with open(f"out/{args.id}/results/{args.result_id}.json", 'w') as f:
         json.dump(results_json, f, indent=4)
+
+    # millor posar les mètriques en el json tmb!
     
     compute_text_quality(results_metrics)
 
