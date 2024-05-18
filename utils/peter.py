@@ -92,6 +92,8 @@ def content(context_loss, text_loss, rating_loss):
 
 
 
+
+
 # Encara estic intenant veure d'on ve el context...
 # Això és la clau de l'entrenament. Depenen del que si posis loss aprendrà a fer una cosa o altra el model
 def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rating_criterion, ntokens, tgt_len):
@@ -99,6 +101,16 @@ def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rat
     # Aquesta és la loss function que utiliza SEMPRE el model per entrenar i fer el test inclús
 
     # Què vull fer servir jo?
+
+    # de predicted només s'utilitza: 
+    # log_word_prob les probabilitats en cada query sobre tots els tokens del vocabulari
+    # log_context_dis les probabilitas exactament igual que en paraula però sense tenir en compte ordre paraules?
+    # rating_p el rating predit per comparar-lo amb el real
+    # NO les attns
+
+    # de real només s'utilitza:
+    # rating per comparar-lo amb el rating predit
+    # text (en la versió de shifted right)
     
 
     user, item, rating, text = real
@@ -121,7 +133,13 @@ def loss(predicted, real, context_reg, text_reg, rating_reg, text_criterion, rat
 
     
     c_loss = text_criterion(context_dis.view(-1, ntokens), text[1:-1].reshape((-1,))) # This is a bit ugly
-    t_loss = text_criterion(log_word_prob.view(-1, ntokens), text[1:].reshape((-1,)))
+    #1234 [:-1] crec aquí hi havia. Crec que el leakage be de treure aquí el [1: de fet]
+    # Què significa aquí un [1:]? Que no miris el primer token, que crec que well obviously és el <bos>
+    # Potser per això a ells no els genera el <bos>? Però no justifica que el meu hi hagi leakage això només?
+    
+    # el [1:] és per fer el shift right del output
+    t_loss = text_criterion(log_word_prob.view(-1, ntokens), text[1:].reshape((-1,))) # ara modificant la mask cal canviar,
+    # abans era text[1:]
     r_loss = rating_criterion(rating_p, rating)
 
     loss = c_loss * context_reg + t_loss * text_reg + r_loss * rating_reg # ordre més normal ara

@@ -81,27 +81,74 @@ class EntityDict:
 class TokenDict(EntityDict):
     def __init__(self, special_tokens, max_tokens):
         super().__init__()
-        self.special_tokens = special_tokens # bos, eos, pad, unk
+        self.special_tokens = special_tokens # bos, eos, pad, unk, cut
         for token in special_tokens:
             self.add_entity(token)
         self.max_tokens = max_tokens
-        self.bos, self.eos, self.pad, self.unk = [self.entity_to_idx[token] for token in special_tokens]
+        print('context_window (max_tokens) is', max_tokens)
+        
+        self.bos, self.eos, self.pad, self.unk, self.cut = [self.entity_to_idx[token] for token in special_tokens]
+
+        # Crec que pot ser interessant pel model distingir entre frases que realment han acabat <eos>
+        # i les frases que les he tallat jo pq tots tinguin la mateixa longitud <cut>
+
+        # self.bos -> serveix simplement per començar a construir el text a partir de algo
+        # self.eos -> serveix per indicar que s'ha acabat la frase i no s'ha de generar ja res més
+        # self.pad -> serveix només per fer que totes les frases tinguin exactament els mateixos tokens
+        # self.unk -> significa que és un token desconegut no part del vocabulari
+        # self.cut -> significa que s'ha tallat la frase pq era massa llarga, per diferenciar-ho del <eos> normal
 
     def add_sentence(self, tokens):
         for token in tokens[:self.max_tokens]:
             self.add_entity(token)
     
     def encode(self, tokens):
+        tokens_size = len(tokens)
         content = [self.entity_to_idx.get(token, self.unk) for token in tokens[:self.max_tokens]]
-        return [self.bos, *content, self.eos] + [self.pad] * (self.max_tokens - len(content))
+        if tokens_size <= self.max_tokens:
+            return [self.bos, *content, self.eos] + [self.pad] * (self.max_tokens - tokens_size)
+        else:
+            return [self.bos, *content, self.cut]
     
-    def decode(self, token_ids, raw=False):
-        if not raw:
-            assert token_ids[0] == self.bos
-            eos_idx = token_ids.index(self.eos)
-            return [self.idx_to_entity[token_id] for token_id in token_ids[1:eos_idx]]
+
+    def decode(self, token_ids, mode):
+
+        valid_modes = [
+            'correct', # <bos> al principi i <eos> + padding o <cut> al final si era més llarga
+            'sceptic', # <bos> al principi però no necessàriament <eos> o <cut>
+            'literal'  # els caràcters especials no importen per res
+        ]
+        if mode not in valid_modes:
+            raise ValueError(f"Invalid mode {mode}. Expected one of: {valid_modes}")
         
-        return [self.idx_to_entity[token_id] for token_id in token_ids]
+        if mode == 'literal':
+            return [self.idx_to_entity[token_id] for token_id in token_ids]
+        
+        assert token_ids[0] == self.bos
+        
+        if self.eos in token_ids:
+            termination_idx = token_ids.index(self.eos)
+        
+        elif token_ids[-1] == self.cut:
+            termination_idx = len(token_ids)
+
+        else:
+            if mode == 'correct':
+                raise ValueError("It was not correct")
+            else:
+                termination_idx = len(token_ids)
+
+        return [self.idx_to_entity[token_id] for token_id in token_ids[1:termination_idx]]
+        
+
+        # # el cut només té sentit predir-lo al final de tot
+        # elif self.cut in token_ids: # tècnicament el cut només hauria de poder ser al final
+        #     termination_idx = token_ids.index(self.cut) + 1 # pq es vegi en el text que ha sigut tallat?
+        # else:
+        #     if mode 
+        #     assert False, "No eos or cut token found"
+        
+        # return [self.idx_to_entity[token_id] for token_id in token_ids[1:termination_idx]]
     
     
     def keep_most_frequent(self, vocab_size):
@@ -128,13 +175,12 @@ class MyDataset(Dataset):
         # 4, transform users, items and text to ID's
         print(f'{now_time()}Creating entities and transforming data')
 
-        print("Creating entities")
         self.user_dict = EntityDict()
         self.item_dict = EntityDict()
         original_data["user"].apply(self.user_dict.add_entity)
         original_data["item"].apply(self.item_dict.add_entity)
 
-        special_tokens = ["<bos>", "<eos>", "<pad>", "<unk>"]
+        special_tokens = ["<bos>", "<eos>", "<pad>", "<unk>", "<cut>"]
         self.token_dict = TokenDict(special_tokens, self.context_window)
         original_data["tokenized_text"].apply(self.token_dict.add_sentence)
 
@@ -149,7 +195,7 @@ class MyDataset(Dataset):
         self.user_decode = lambda x: self.user_dict.idx_to_entity[x]
         self.item_decode = lambda x: self.item_dict.idx_to_entity[x]
         self.text_encode = lambda x: self.token_dict.encode(x)
-        self.text_decode = lambda x, raw=False: self.token_dict.decode(x, raw)
+        self.text_decode = lambda x, mode: self.token_dict.decode(x, mode)
 
         self.users = torch.tensor(original_data["user"].apply(self.user_encode))
         self.items = torch.tensor(original_data["item"].apply(self.item_encode))

@@ -22,9 +22,21 @@ class PETER(nn.Module):
         super(PETER, self).__init__()
         self.pos_encoder = PositionalEncoding(emsize, dropout)  # emsize: word embedding size
 
-        # why am I only using 2 heads?
+        # # why am I only using 2 heads?
+        # print('emsize is', emsize) # 512
+        # print('nhead is', nhead) # 2
+        # print('nhid is', nhid) # 2048
+        # print('dropout is', dropout) # 0.2
+        # print('nlayers is', nlayers) # 2
+
         encoder_layers = TransformerEncoderLayer(emsize, nhead, nhid, dropout)  # nhid: dim_feedforward, one basic layer, including multi-head attention and FFN
         self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)  # loop over the one above
+
+
+        # Sembla que amb els transformers es poden combinar diferents embeddings en diferents posicions
+        # La única restricció és que tots han de tenir la mateixa mida, i en aquest cas és emsize (512)
+
+        # També tots els outputs dels transformers hidden tindran la mateixa mida, que també és emsize (512)
 
         self.user_embeddings = nn.Embedding(nuser, emsize)
         self.item_embeddings = nn.Embedding(nitem, emsize)
@@ -46,18 +58,38 @@ class PETER(nn.Module):
         self.emsize = emsize
 
         # Encara he de mirar lo de les màscares. Aviam ja no es dirà aquest fitxer peter.py
+
+        # LES 2 COSES QUE S'UTILITZEN PER CREAR LA MÀSCARA: src_len i tgt_len
+        print('src_len is', src_len)
+        print('tgt_len is', tgt_len)
+
+        #1234 tret un  + 1
+        self.attn_mask = PETER.generate_andreu_mask(src_len + tgt_len) # el +1 és pq ells tenien els paràmetres mal?
         
-        if peter_mask: # Crec que hauria de començar ja a tocar les màscares d'atenció, i sobretot hauria ja
-            # d'anar avançant la memòria, ni que siguin versions tontes en brut, perquè sinó arribaran les
-            # pròximes reunions i no tindré res fet i m'estressaré i tot anirà malament. No cal que faci un
-            # treball de 10, de fet és possible que ja no pugui aconseguir un treball de 10, però com a mínim
-            # he de fer un treball que de moment no tinc res fet. De fet la nota no m'importa massa, però
-            # hauria d'acabar el treball que és el que volen en la uni fer tenir tots els graus
-            self.attn_mask = generate_peter_mask(src_len, tgt_len)
-        else:
-            self.attn_mask = generate_square_subsequent_mask(src_len + tgt_len)
+        # if peter_mask: # Crec que hauria de començar ja a tocar les màscares d'atenció, i sobretot hauria ja
+        #     # d'anar avançant la memòria, ni que siguin versions tontes en brut, perquè sinó arribaran les
+        #     # pròximes reunions i no tindré res fet i m'estressaré i tot anirà malament. No cal que faci un
+        #     # treball de 10, de fet és possible que ja no pugui aconseguir un treball de 10, però com a mínim
+        #     # he de fer un treball que de moment no tinc res fet. De fet la nota no m'importa massa, però
+        #     # hauria d'acabar el treball que és el que volen en la uni fer tenir tots els graus
+        #     self.attn_mask = generate_peter_mask(src_len, tgt_len)
+        #     print("s'ha creat la màscara ja, amb el generate_peter_mask")
+        # else:
+        #     assert False
+        #     self.attn_mask = generate_square_subsequent_mask(src_len + tgt_len)
+        #     print("ups, era en square???")
+        
+        
 
         self.init_weights()
+
+    @staticmethod
+    def generate_andreu_mask(size):
+        mask = torch.tril(torch.ones(size, size))
+        mask = mask == 0
+        mask[0, 1] = False # allow to attend for user and item
+        return mask
+
 
     def init_weights(self):
         initrange = 0.1
@@ -85,73 +117,6 @@ class PETER(nn.Module):
         word_prob = self.hidden2token(hidden[-1])  # (batch_size, ntoken)
         log_word_prob = func.log_softmax(word_prob, dim=-1)
         return log_word_prob
-
-    @staticmethod
-    def get_topk_tokens(log_token_dis, topk):
-        token_prob = log_token_dis.exp()  # (batch_size, ntoken)
-        if topk == 1:
-            context = torch.argmax(token_prob, dim=1, keepdim=True)  # (batch_size, 1)
-        else:
-            context = torch.topk(token_prob, topk, 1)[1]  # (batch_size, topk)
-        return context  # (batch_size, topk)
-
-
-    # tot i que sembla que funciona, encara falten implementar coses i acabar-la de mirar
-    # abans de mirar-me el generate he d'entendre també com funciona en el train i test
-    # tot i que potser mirarar el generate tmb ajuda
-
-    # Es podria generar text amb max_length <= self.context_window, i a partir d'aquí si el vulguessis fer més llarg
-    # ja no li podries passar tot el text prèviament generat pel propi model, i.e. no és capaç de agafar un input
-    # tant llarg. Encara hauria de simplificar els arguments del PETER per realment només els que crec que són útils
-    # i provar a jugar amb ells com varien les coses
-    def generate(self, max_length, num_beams, do_sample, user, item, device):
-
-        assert num_beams==1, "only greedy generation for now" # per donar una pista amb l'assert
-        assert do_sample==False, "only greedy generation for now" # és una mica estrany el format ngl
-
-        batch_size = user.size(0)
-
-        # Comencem amb tot <bos> i anirem afegint paraules iterativament
-        text = torch.full((1, batch_size), self.bos_idx).to(device)
-        
-        user = user.to(device)
-        item = item.to(device)
-
-        # # sembla que en el PETER, el primer text és torch.Size([1, 128]) amb tot start_idx
-        # # el següents es va afegint una dimensió més amb les paraules greedy descodificades per cadascú
-
-        # # PETER: size (src_len - 1, batch_size)
-        # # should it already be of all the size and only edit parts of it?
-        # text = torch.tensor(self.bos_idx).repeat(batch_size, 1).t()  # (src_len - 1, batch_size)
-        #print('text shape', text.shape)
-
-        #text = torch.tensor(self.bos_idx) # ara mateix no tinc el beggining of sequence aquí
-        # li hauré de canviar la shape?
-
-        # ojo que això és bastant del copilot encara
-
-        # A la step 0 es calcula la predicció de context i de rating
-        # Greedy: a tots els steps, inclòs el 0, es calcula el següent token més probable del text. S'havia començat amb el <bos>
-
-        # tindria sentit anar ajustant la predicció dels ratings i context en cada step? Crec que no, perquè la cosa és que les
-        # generes això en primer lloc i després vas generant el text a poc a poc amb la idea de en base de això hauria de ser
-
-        # És necessari executar el model max_length cops, perquè l'únic que sap fer el model és predir exactament 1 token més
-        # a partir de tot el que ja sap, i si no sap res doncs necessitarà max_length cops per generar el text de la longitud
-        # que vulguis
-
-        for step in range(max_length):
-            if step == 0: # step 0: es calcula el rating, el context i el 1r token
-                log_word_prob, log_context_dis, rating, _ = self.forward(user, item, text, False)
-                context = PETER.get_topk_tokens(log_context_dis, topk=max_length)
-            else: # step > 0: se li introdueix el seu text que havia generat fins ara i es NOMÉS el següent token
-                  # tècnicament el model també torna a calcular una altra predicció de context i rating però s'ignora,
-                  # perquè el que importa aquí és generar un text llarg de manera autoregressiva
-                log_word_prob, _, _, _ = self.forward(user, item, text, False, False, False)
-            _, next_token = torch.max(log_word_prob, dim=-1)
-            text = torch.cat([text, next_token.unsqueeze(0)], 0) # aquí és on es concatena
-
-        return rating, context, text.T # millor transposar aquí ja? Crec que sí
 
 
     def forward(self, user, item, text, seq_prediction=True, context_prediction=True, rating_prediction=True):
@@ -213,6 +178,9 @@ class PETER(nn.Module):
         # Aquest és el primer pas clau de tots, aplicar el transformer a tot arreu. Perquè totes les altres coses
         # les treuen a partir d'aquest encoding produït pel transformer. Sembla que és el tipus de transformer
         # que codifica, i.e. el encoder only, no el encoder + decoder
+        # CREC QUE HE DE CANVIAR ALGO DE AQUÍ. I JA ESTÀ BÉ PQ SEGUEIXO APRENENT I AVANÇANT
+        # ARA JA HE DE MIRAR LO DE LA ATTN_MASK YAY. L'HE DE PROBABLY AMPLIAR EN 1?
+        # w_src ha augmentat la mida en 1
         hidden, attns = self.transformer_encoder(src, attn_mask, key_padding_mask)
         # (total_len, batch_size, emsize) vs. (nlayers, batch_size, total_len_tgt, total_len_src)
 
@@ -228,6 +196,8 @@ class PETER(nn.Module):
 
         # generate first token: model(user, item, text, False) (és el seq_prediction)
         # generate an additional token: model(user, item, text, False, False, False) seq_predction, context_prediction, rating_prediction
+
+        # per mi no acaba de tenir sentit tot això
 
         if rating_prediction:
             rating = self.predict_rating(hidden)  # (batch_size,)

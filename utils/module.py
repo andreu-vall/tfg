@@ -200,6 +200,12 @@ class MLP(nn.Module):
         return rating
 
 
+# TOT són matrius quadrades de total_len x total_len
+
+# És al revés del que interpretaria jo, perquè normalment la màscara se fa servir per AMAGAR
+# coses que el teu model no vols que vegi. Per tant, posar un True a la màscara vol dir que 
+# vols amagar aquella cosa, i posar un False a la màscara vol dir que NO la vols amagar
+
 # Triangle de 1s a la part estrictament superior i 0s a la resta
 def generate_square_subsequent_mask(total_len):
     mask = torch.tril(torch.ones(total_len, total_len))  # (total_len, total_len), lower triangle -> 1.; others 0.
@@ -208,9 +214,21 @@ def generate_square_subsequent_mask(total_len):
 
 
 # Exactament igual que l'anterior, amb l'única diferència que el 2n element de la 1a fila (0, 1) és False
+# en realitat només hi ha un paràmetre, src_len + tgt_len, que serà la mida de la matriu quadrada
 def generate_peter_mask(src_len, tgt_len):
     total_len = src_len + tgt_len
     mask = generate_square_subsequent_mask(total_len)
     mask[0, 1] = False  # allow to attend for user and item
     return mask
 
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# aquest és de l'Alejandro
+def plot_mask(mask):
+    plt.imshow(mask, cmap='Greys', interpolation='nearest')
+    plt.xticks(np.arange(0, mask.shape[1], 1))
+    plt.yticks(np.arange(0, mask.shape[0], 1))
+    plt.grid()
+    plt.show()

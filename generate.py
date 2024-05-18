@@ -5,49 +5,137 @@ import sys
 from torch.utils.data import DataLoader, Subset
 import torch
 import tqdm
+import torch.nn as nn
 
 from utils.peter import now_time, unique_sentence_percent, bleu_score, rouge_score
 from peter_model import PETER
 from data import MyDataset, MySplitDataset, setup_logger
 
 
-# Auxiliar, ho crida per cada batch i junta els resultats
-def generate(data : MyDataset, dataloader, model : PETER, device, strategy):
+# Crec que hauria de moure aquests 2 mètodes fora
 
-    results_json, results_metrics = [], []
+def get_topk_tokens(log_token_dis, topk):
+    token_prob = log_token_dis.exp()  # (batch_size, ntoken)
+    if topk == 1:
+        context = torch.argmax(token_prob, dim=1, keepdim=True)  # (batch_size, 1)
+    else:
+        context = torch.topk(token_prob, topk, 1)[1]  # (batch_size, topk)
+    return context  # (batch_size, topk)
+
+
+# tot i que sembla que funciona, encara falten implementar coses i acabar-la de mirar
+# abans de mirar-me el generate he d'entendre també com funciona en el train i test
+# tot i que potser mirarar el generate tmb ajuda
+
+# Es podria generar text amb max_length <= self.context_window, i a partir d'aquí si el vulguessis fer més llarg
+# ja no li podries passar tot el text prèviament generat pel propi model, i.e. no és capaç de agafar un input
+# tant llarg. Encara hauria de simplificar els arguments del PETER per realment només els que crec que són útils
+# i provar a jugar amb ells com varien les coses
+def generate_batch(model:nn.Module, bos_idx, max_length, num_beams, do_sample, user, item, device):
+
+    assert num_beams==1, "only greedy generation for now" # per donar una pista amb l'assert
+    assert do_sample==False, "only greedy generation for now" # és una mica estrany el format ngl
+
+    batch_size = user.size(0)
+
+    # Comencem amb tot <bos> i anirem afegint paraules iterativament
+    text = torch.full((1, batch_size), bos_idx).to(device)
+    
+    user = user.to(device)
+    item = item.to(device)
+
+    # # sembla que en el PETER, el primer text és torch.Size([1, 128]) amb tot start_idx
+    # # el següents es va afegint una dimensió més amb les paraules greedy descodificades per cadascú
+
+    # # PETER: size (src_len - 1, batch_size)
+    # # should it already be of all the size and only edit parts of it?
+    # text = torch.tensor(self.bos_idx).repeat(batch_size, 1).t()  # (src_len - 1, batch_size)
+    #print('text shape', text.shape)
+
+    #text = torch.tensor(self.bos_idx) # ara mateix no tinc el beggining of sequence aquí
+    # li hauré de canviar la shape?
+
+    # ojo que això és bastant del copilot encara
+
+    # A la step 0 es calcula la predicció de context i de rating
+    # Greedy: a tots els steps, inclòs el 0, es calcula el següent token més probable del text. S'havia començat amb el <bos>
+
+    # tindria sentit anar ajustant la predicció dels ratings i context en cada step? Crec que no, perquè la cosa és que les
+    # generes això en primer lloc i després vas generant el text a poc a poc amb la idea de en base de això hauria de ser
+
+    # És necessari executar el model max_length cops, perquè l'únic que sap fer el model és predir exactament 1 token més
+    # a partir de tot el que ja sap, i si no sap res doncs necessitarà max_length cops per generar el text de la longitud
+    # que vulguis
+
+    for step in range(max_length):
+        if step == 0: # step 0: es calcula el rating, el context i el 1r token
+            log_word_prob, log_context_dis, rating, _ = model(user, item, text, False) # el forward del model
+            context = get_topk_tokens(log_context_dis, topk=max_length)
+        else: # step > 0: se li introdueix el seu text que havia generat fins ara i es NOMÉS el següent token
+            # tècnicament el model també torna a calcular una altra predicció de context i rating però s'ignora,
+            # perquè el que importa aquí és generar un text llarg de manera autoregressiva
+            log_word_prob, _, _, _ = model(user, item, text, False, False, False) # el forward del model
+        # print('step', step)
+        # print('here, log_word_prob shape is', log_word_prob.shape)
+        _, next_token = torch.max(log_word_prob, dim=-1)
+        # print('and the next token shape is', next_token.shape)
+        # if step == 1:
+        #     assert(False)
+        text = torch.cat([text, next_token.unsqueeze(0)], 0) # aquí és on es concatena
+
+    return rating, context, text.T # millor transposar aquí ja? Crec que sí
+
+
+
+# Què estava rent?
+
+# Auxiliar, ho crida per cada batch i junta els resultats
+def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_sample):
+
+    results, metrics = [], []
 
     for batch in tqdm.tqdm(dataloader):
 
         batch = [elem.to(device) for elem in batch] # moure a cuda
 
         user, item, rating, text = batch # en el generate no es transposa el text
+        batch_size = user.size(0)
 
         # sembla que tarda uns 2 min a generar text amb context_window = 15 amb greedy pel test
 
+        # falta posar el paràmetre de la longitud a generar, que ha de ser probablement més petita que la context_window.
+        # De fet podria ser més llarga però llavors s'oblidaria del que ha dit ell mateix i seria possiblement kinda stupid
+
         # it's predicted using: user & item only (not using the real rating, the real text or the real context)
-        assert strategy == 'greedy', 'Only greedy strategy is implemented'
-        predicted = model.generate(data.context_window, num_beams=1, do_sample=False, user=user, item=item, device=device)
+        predicted = generate_batch(model, data.token_dict.bos, data.context_window, num_beams, do_sample, user, item, device)
+        # el bo aquest anterior d'abans
+        #predicted = generate_batch(data, dataloader, model, device, strategy)
+        # predicted = model.generate(data.context_window, num_beams=1, do_sample=False, user=user, item=item, device=device)
         predicted_rating, predicted_context, predicted_text = predicted
   
         decoded_user = [data.user_decode(u) for u in user]
         decoded_item = [data.item_decode(i) for i in item]
 
-        # havent entrenat una època sembla que ja ha après a generar <bos> i <eos>
-        decoded_text = [data.text_decode(list(t)) for t in text] # needs a list to call the .index
+        decoded_text = [data.text_decode(list(t), mode='correct') for t in text] # needs a list to call the .index
         untokenized_text = [data.untokenize(t) for t in decoded_text]
 
-        decoded_predicted_context = [data.text_decode(list(c), raw=True) for c in predicted_context]
+        decoded_predicted_context = [data.text_decode(list(c), mode='literal') for c in predicted_context]
         untokenized_predicted_context = [data.untokenize(c) for c in decoded_predicted_context]
 
         # sembla q tmb cal raw pq sinó peta? he entrenat ara 3 èpoques
         # Els <bos> sí que els posa, però el <eos> sembla que de moment no el posa sovint. De fet el <bos> potser el posa el model en sí
         # Potser predir l'últim token és estúpid, pq és either <eos> o <pad>, igual que el primer que és sempre <bos>
         # Entrenat 5 èpoques en el summary sí que ja ha après a posar el <bos> i <eos>
-        decoded_predicted_text = [data.text_decode(list(t)) for t in predicted_text] # , raw=True
+        # entrenant 1 època això (ense el raw=True) peta
+        decoded_predicted_text = [data.text_decode(list(t), mode='sceptic') for t in predicted_text] # , raw=True
         untokenized_predicted_text = [data.untokenize(t) for t in decoded_predicted_text]
 
-        for i in range(len(decoded_user)):
-            results_json.append({
+        # wait ara no estic passant res manualment a cpu??
+
+        # Bruh amb 1 època només m'està generant absolutament tot <bos> xD
+
+        for i in range(batch_size):
+            results.append({
                 'user': decoded_user[i],
                 'item': decoded_item[i],
                 'predicted_rating': predicted_rating[i].item(), # cal l'item pq si no és tensor i no és serialitzable
@@ -57,16 +145,26 @@ def generate(data : MyDataset, dataloader, model : PETER, device, strategy):
                 'predicted_text': untokenized_predicted_text[i],
                 'real_text': untokenized_text[i]
             })
-            results_metrics.append({
+            metrics.append({
                 'tokens_predicted_text': decoded_predicted_text[i],
                 'tokens_real_text': decoded_text[i],
                 'predicted_text': untokenized_predicted_text[i],
                 'real_text': untokenized_text[i]
             })
 
-    return results_json, results_metrics
+    parameters = {
+        "num_beams": num_beams,
+        "do_sample": do_sample
+    }
+    results_json = {
+        "parameters": parameters,
+        "results": results
+    }
+    return results_json, metrics
 
 
+
+# La qualitat del text a on l'hauria de posar?
 
 def compute_text_quality(results_metrics):
 
@@ -74,10 +172,11 @@ def compute_text_quality(results_metrics):
     tokens_text_real = [result['tokens_real_text'] for result in results_metrics]
     
     # Pel BLEU necessito els tokens en la forma de llista de tokens com a string
+    # Andreu: indicar clarament que s'està fent en % (pq el BLEU és un valor entre 0 i 1 normalment)
     BLEU1 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=1, smooth=False)
-    print(now_time() + 'BLEU-1 {:7.4f}'.format(BLEU1))
+    print(f"{now_time()}BLEU-1 {BLEU1:7.4f} %")
     BLEU4 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=4, smooth=False)
-    print(now_time() + 'BLEU-4 {:7.4f}'.format(BLEU4))
+    print(f"{now_time()}BLEU-4 {BLEU4:7.4f} %")
     
     USR, USN = unique_sentence_percent(tokens_text_predicted)
     print(now_time() + 'USR {:7.4f} | USN {:7}'.format(USR, USN))
@@ -113,7 +212,7 @@ def parse_arguments():
     if os.path.isfile(result_path):
         raise ValueError('This result id already exists!')
 
-    with open(f'{path}/train.json', 'r') as f:
+    with open(f'{path}/train_parameters.json', 'r') as f:
         train_args = json.load(f)
     
     merged_args = {**train_args, **vars(cmd_args)} # el segon diccionari sobreescriu el primer segons Copilot
@@ -128,9 +227,7 @@ if __name__ == "__main__":
     path = os.path.join('out', args.id)
 
     mylogs = os.path.join(path, 'logs')
-    peter_logger = setup_logger('peter_logger', f'{mylogs}/peter.log')
     history_logger = setup_logger('history_logger', f'{mylogs}/history.log')
-
     history_logger.info(f"{now_time()}python {' '.join(sys.argv)}")
 
     mydevice = torch.device('cuda' if not args.cpu else 'cpu')
@@ -146,11 +243,15 @@ if __name__ == "__main__":
 
     test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
-    results_json, results_metrics = generate(mydata, test_dataloader, mymodel, mydevice, args.strategy)
+    assert args.strategy == 'greedy', 'Only greedy strategy is implemented'
+    num_beams = 1
+    do_sample = False
+
+    results_json, results_metrics = generate(mydata, test_dataloader, mymodel, mydevice, num_beams, do_sample)
+
 
     with open(f"out/{args.id}/results/{args.result_id}.json", 'w') as f:
         json.dump(results_json, f, indent=4)
-
     
     compute_text_quality(results_metrics)
 

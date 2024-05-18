@@ -45,7 +45,7 @@ def bert_tokenize(data_path, override=False):
 
 
 def load(data_path, tokenizer, override=False):
-    assert tokenizer == 'bert-base-uncased', "Only bert tokenizer is supported"
+    assert tokenizer == 'tokenizer-bert-base-uncased', "Only bert tokenizer is supported"
     return bert_tokenize(data_path, override)
 
 
