@@ -36,27 +36,28 @@ def bleu_score(references, generated, n_gram=4, smooth=False):
     return bleu_s * 100
 
 
-def two_seq_same(sa, sb):
-    if len(sa) != len(sb):
-        return False
-    for (wa, wb) in zip(sa, sb):
-        if wa != wb:
-            return False
-    return True
+# def two_seq_same(sa, sb):
+#     if len(sa) != len(sb):
+#         return False
+#     for (wa, wb) in zip(sa, sb):
+#         if wa != wb:
+#             return False
+#     return True
 
 
-def unique_sentence_percent(sequence_batch):
-    unique_seq = []
-    for seq in sequence_batch:
-        count = 0
-        for uni_seq in unique_seq:
-            if two_seq_same(seq, uni_seq):
-                count += 1
-                break
-        if count == 0:
-            unique_seq.append(seq)
+# # LOL L'HAN FET O(N^2) so ugly
+# def unique_sentence_percent(sequence_batch):
+#     unique_seq = []
+#     for seq in sequence_batch:
+#         count = 0
+#         for uni_seq in unique_seq:
+#             if two_seq_same(seq, uni_seq):
+#                 count += 1
+#                 break
+#         if count == 0:
+#             unique_seq.append(seq)
 
-    return len(unique_seq) / len(sequence_batch), len(unique_seq)
+#     return len(unique_seq) / len(sequence_batch), len(unique_seq)
 
 
 def mean_absolute_error(predicted, max_r, min_r, mae=True):

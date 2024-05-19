@@ -5,12 +5,13 @@ from torch.utils.data import DataLoader, Subset
 import torch
 import tqdm
 import torch.nn as nn
+import torch.nn.functional as F
 
 from peter_model import PETER
-from data import MyDataset, MySplitDataset, record_execution, decode_batch_results, compute_text_quality, get_RMSE_MAE
+from data import MyDataset, MySplitDataset, record_execution, decode_batch_results, get_RMSE_MAE
+from utils.peter import bleu_score, rouge_score
 
 
-# Crec que hauria de moure aquests 2 mètodes fora
 
 def get_topk_tokens(log_token_dis, topk):
     token_prob = log_token_dis.exp()  # (batch_size, ntoken)
@@ -21,18 +22,17 @@ def get_topk_tokens(log_token_dis, topk):
     return context  # (batch_size, topk)
 
 
-# tot i que sembla que funciona, encara falten implementar coses i acabar-la de mirar
-# abans de mirar-me el generate he d'entendre també com funciona en el train i test
-# tot i que potser mirarar el generate tmb ajuda
 
 # Es podria generar text amb max_length <= self.context_window, i a partir d'aquí si el vulguessis fer més llarg
 # ja no li podries passar tot el text prèviament generat pel propi model, i.e. no és capaç de agafar un input
 # tant llarg. Encara hauria de simplificar els arguments del PETER per realment només els que crec que són útils
 # i provar a jugar amb ells com varien les coses
-def generate_batch(model:nn.Module, bos_idx, max_length, num_beams, do_sample, user, item, device):
+def generate_batch(model:nn.Module, bos_idx, max_length, top_k_sample, num_beams, user, item, device):
 
-    assert num_beams==1, "only greedy generation for now" # per donar una pista amb l'assert
-    assert do_sample==False, "only greedy generation for now" # és una mica estrany el format ngl
+    assert num_beams==1, "beam search not yet implemented"
+    # Estaria bé també tenir el beam search però realment tampoc aporta gaire més, simplement tardarà més
+    # en generar perquè consdierarà més possibilitats a l'hora. L'única cosa que m'aportaria és que jo sabria
+    # quina és la probabilitat combinada d'una següència sencera
 
     batch_size = user.size(0)
     # Comencem amb tot <bos> i anirem afegint paraules iterativament
@@ -52,15 +52,25 @@ def generate_batch(model:nn.Module, bos_idx, max_length, num_beams, do_sample, u
         # step > 0: se li introdueix el seu text que havia generat fins ara i genera 1 token més
         else:
             log_word_prob, _, _, _ = model(user, item, text, False, False, False)
+
+        # squeeze: elimina dimensions de mida 1
+        # unsqueeze: afegeix dimensions de mida 1¡
+        if top_k_sample == 1: # greedy
+            _, next_token = torch.max(log_word_prob, dim=-1)
+            #print('here next_token shape was:', next_token.shape) # [128]
         
-        _, next_token = torch.max(log_word_prob, dim=-1) # greedy
+        else: # sampling, ojo que maybe el copilot la pot haver liat aquí. això fa que no sigui determinístic la generació
+            topk_prob, topk_indices = torch.topk(F.softmax(log_word_prob, dim=-1), top_k_sample)
+            next_token = topk_indices.view(-1)[torch.multinomial(topk_prob, 1).squeeze()]
+            #print('here next_token shape is:', next_token.shape) # [128]
+
         text = torch.cat([text, next_token.unsqueeze(0)], 0)
 
     return rating, context, text.T
 
 
 # Auxiliar, ho crida per cada batch i junta els resultats
-def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_sample, target_length):
+def generate(data:MyDataset, dataloader, model:PETER, device, top_k_sample, num_beams, target_length):
 
     if target_length is None: # potser hauria d'adclarir en execució script que si no s'pesecifica s'usa la shape del model
         target_length = data.context_window
@@ -82,7 +92,7 @@ def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_samp
         # No del tot necessàriament? Potser és interessant provar-ho si és fàcil de fer-ho
 
         # it's predicted using: user & item only (not using the rating nor the text)
-        predicted = generate_batch(model, data.token_dict.bos, target_length, num_beams, do_sample, user, item, device)
+        predicted = generate_batch(model, data.token_dict.bos, target_length, top_k_sample, num_beams, user, item, device)
         
         predicted_rating, predicted_context, predicted_text = predicted
 
@@ -93,19 +103,56 @@ def generate(data:MyDataset, dataloader, model:PETER, device, num_beams, do_samp
         metrics.extend(batch_metrics)
 
     parameters = {
+        "top_k_sample": top_k_sample,
         "num_beams": num_beams,
-        "do_sample": do_sample
+        "target_length": target_length # també és molt important
     }
     return parameters, metrics, results
+
+
+
+def compute_text_quality(results_metrics):
+
+    tokens_text_predicted = [result['tokens_predicted_text'] for result in results_metrics]
+    tokens_text_real = [result['tokens_real_text'] for result in results_metrics]
+    
+    # Pel BLEU necessito els tokens en la forma de llista de tokens com a string
+    BLEU1 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=1, smooth=False) # són en %
+    BLEU4 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=4, smooth=False)
+    
+    # Es feia amb O(N^2) quan ja tinc tmb les frases com a string...
+    # USR, USN = unique_sentence_percent(tokens_text_predicted)
+    predicted_text = [result['predicted_text'] for result in results_metrics]
+    unique_sentences = set(predicted_text)
+    USN = len(unique_sentences)
+    USR = USN / len(predicted_text)
+
+    real_text = [result['real_text'] for result in results_metrics]
+
+    # En canvi pel ROUGE necessito els texts passats a string real tot junt ja. Possiblement té més valor doncs?
+    ROUGE = rouge_score(real_text, predicted_text)  # a dictionary
+
+    return {
+        'BLEU-1': BLEU1,
+        'BLEU-4': BLEU4,
+        'USR': USR,
+        'USN': USN,
+        'ROUGE': ROUGE
+    }
 
 
 
 # Join cmd arguments and the arguments saved previously from the training
 def parse_arguments():
     cmd_parser = argparse.ArgumentParser(description='Generate')
+
     cmd_parser.add_argument('id', type=str, help='model id')
-    cmd_parser.add_argument('strategy', type=str, choices=['greedy'], help='decoding strategy')
     cmd_parser.add_argument('result_id', type=str, help='result id')
+
+    cmd_parser.add_argument('--top_k_sample', type=int, help='top k sampling', default=1) # 1=greedy, >1=sampling
+    cmd_parser.add_argument('--num_beams', type=int, help='number of beams', default=1)
+    cmd_parser.add_argument('--seed', type=int, help='random seed', default=42)
+
     cmd_parser.add_argument('--target_length', type=int, help='target length') # should be optative and default the context_window?
     cmd_parser.add_argument('--cpu', action='store_true', help='don\'t use CUDA')
     cmd_args = cmd_parser.parse_args()
@@ -121,8 +168,8 @@ def parse_arguments():
     if os.path.isfile(result_path):
         raise ValueError('This result id already exists!')
 
-    with open(f'{path}/train.json', 'r') as f:
-        train_args = json.load(f)['parameters']
+    with open(f'{path}/train_args.json', 'r') as f:
+        train_args = json.load(f)
     
     merged_args = {**train_args, **vars(cmd_args)} # el segon diccionari sobreescriu el primer segons Copilot
     args = argparse.Namespace(**merged_args)
@@ -146,17 +193,17 @@ if __name__ == "__main__":
     mysplitdata = MySplitDataset(args.data_path, len(mydata), args.split_id, True)
 
     test_data = Subset(mydata, mysplitdata.test)
-
     test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
-    assert args.strategy == 'greedy', 'Only greedy strategy is implemented'
-    num_beams = 1
-    do_sample = False
+    # crec que sobretot en el generate és important de posar una seed!!
+    # Sembla que funciona, amb 2 iteracions diferents ha generat exactament el mateix text, nicee
+    torch.manual_seed(args.seed)
 
-    parameters, metrics, results = generate(mydata, test_dataloader, mymodel, mydevice, num_beams, do_sample, args.target_length)
+    parameters, metrics, results = generate(mydata, test_dataloader, mymodel, mydevice, args.top_k_sample, args.num_beams, args.target_length)
 
     RMSE, MAE = get_RMSE_MAE(results, mydata.max_rating, mydata.min_rating)
 
+    # crec que tarda lo seu en calcular la qualitat del text, potser estaria bé posar una barra de progrés
     text_quality = compute_text_quality(metrics)
 
     metrics_json = {
@@ -165,6 +212,7 @@ if __name__ == "__main__":
         "MAE": MAE,
         "text_quality": text_quality
     }
+    parameters['seed'] = args.seed # ara mateix només la tinc al main però és molt important posar-la en el json
     generate_json = {
         "parameters": parameters,
         "metrics": metrics_json,
@@ -172,6 +220,9 @@ if __name__ == "__main__":
     }
     with open(f"out/{args.id}/results/{args.result_id}.json", 'w') as f:
         json.dump(generate_json, f, indent=4)
+    
+    # Demà dilluns ja no afegiré cap funcionalitat més. He d'escriure ja la memòria, que si no no tindré
+    # algo amb cara i ulls pel dijous, i aniré en una espiral de posar-me nerviós fins el dia 10 de juny
 
     # Demà seguiré per aquí + el test, i aviat he de començar a escriure la memòria ja...
     # LOL la memòria. M'he de passar un dia límit a mi mateix de posar'm-hi ja en serio,

@@ -105,8 +105,8 @@ def parse_arguments():
     if not os.path.exists(path):
         raise ValueError('This id doesn\'t exist!')
 
-    with open(f'out/{cmd_args.train_id}/train.json', 'r') as f:
-        train_args = json.load(f)['parameters']
+    with open(f'out/{cmd_args.train_id}/train_args.json', 'r') as f:
+        train_args = json.load(f)
 
     merged_args = {**train_args, **vars(cmd_args)} # el segon diccionari sobreescriu el primer segons Copilot
     args = argparse.Namespace(**merged_args)
@@ -146,12 +146,13 @@ if __name__ == "__main__":
         args.context_reg, args.text_reg, args.rating_reg, ntokens, tgt_len
     )
     losses_dic, results, metrics = test(mytest_dataloader, mymodel, myloss_fn, mydevice, save_results=True, data=mydata)
-
     # test fent el save_results, en tokenizer-bert-base-uncased window_size=5: 42s (només cal tenir
-    #  en compte per no fer-ho quan no cal); el mateix sense fer el save_results: 5s
+    # en compte per no fer-ho quan no cal); el mateix sense fer el save_results: 5s
     
     RMSE, MAE = get_RMSE_MAE(results, mydata.max_rating, mydata.min_rating)
 
+    # ara que he optimitzat el compute_text_quality el podria caclular sense cap problema, tot i que és una mica de cheating
+    # pq li passo per generar cada token individualment els tokens anteriors reals, no els que ha predit el meu model
     text_quality = compute_text_quality(metrics)
 
     metrics_json = {

@@ -6,6 +6,9 @@ import torch.nn.functional as func
 from typing import Tuple, Optional
 from torch import Tensor
 
+# Andreu: this is probably from https://pytorch.org/docs/stable/_modules/torch/nn/modules/transformer.html#TransformerEncoderLayer
+# If I want to see this code is useful having in utils. Otherwise I should just use directly the torch official library
+
 
 class TransformerEncoderLayer(nn.Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.

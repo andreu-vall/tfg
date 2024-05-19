@@ -21,6 +21,8 @@ class PETER(nn.Module):
         super(PETER, self).__init__()
         self.pos_encoder = PositionalEncoding(emsize, dropout)  # emsize: word embedding size
 
+        # ojo el dropout fa que sigui no deteministic?
+
         # # why am I only using 2 heads?
         # print('emsize is', emsize) # 512
         # print('nhead is', nhead) # 2
@@ -28,7 +30,8 @@ class PETER(nn.Module):
         # print('dropout is', dropout) # 0.2
         # print('nlayers is', nlayers) # 2
 
-        encoder_layers = TransformerEncoderLayer(emsize, nhead, nhid, dropout)  # nhid: dim_feedforward, one basic layer, including multi-head attention and FFN
+        # PETER: nhid: dim_feedforward, one basic layer, including multi-head attention and FFN
+        encoder_layers = TransformerEncoderLayer(emsize, nhead, nhid, dropout)
         self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)  # loop over the one above
 
 
@@ -61,7 +64,7 @@ class PETER(nn.Module):
 
         # LES 2 COSES QUE S'UTILITZEN PER CREAR LA MÀSCARA: src_len i tgt_len
         print('src_len is', src_len) # 2 always
-        print('tgt_len is', tgt_len) # 6 (context_window +1?)
+        print('tgt_len is', tgt_len) # 6 (context_window +1)
 
         # Damn
         self.attn_mask = PETER.generate_andreu_mask(src_len + tgt_len) # el +1 és pq ells tenien els paràmetres mal?
@@ -79,7 +82,7 @@ class PETER(nn.Module):
         #     self.attn_mask = generate_square_subsequent_mask(src_len + tgt_len)
         #     print("ups, era en square???")
 
-        self.init_weights()
+        self.init_weights() # Aquí és on es podria inicialitzar els embeddings de tokens pre-entrenats
 
 
     @staticmethod

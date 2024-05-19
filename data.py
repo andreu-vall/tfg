@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, random_split
 import sys
 import logging
 
-from utils.peter import now_time, unique_sentence_percent, bleu_score, rouge_score, root_mean_square_error, mean_absolute_error
+from utils.peter import now_time, root_mean_square_error, mean_absolute_error
 from tokenizer import load
 
 
@@ -173,7 +173,6 @@ class MyDataset(Dataset):
         original_data["tokenized_text"], self.tokenize, self.untokenize = load(data_path, tokenizer)
 
         # 4, transform users, items and text to ID's
-        print(f'{now_time()}Creating entities and transforming data')
 
         self.user_dict = EntityDict()
         self.item_dict = EntityDict()
@@ -186,9 +185,7 @@ class MyDataset(Dataset):
 
         # here the optative vocab size would be applied. Però crec que MAI no m'interessa limitar el vocabulari de res
         # en tot cas el que cal és un tokenitzador millor, o passar-li menys dades al model si no tens prou recursos
-        print(f"There's {len(self.user_dict)} users")
-        print(f"There's {len(self.item_dict)} items")
-        print(f"There's {len(self.token_dict)} tokens")
+        print(f"There's {len(self.user_dict)} users, {len(self.item_dict)} items and {len(self.token_dict)} tokens")
 
         self.user_encode = lambda x: self.user_dict.entity_to_idx.get(x)
         self.item_encode = lambda x: self.item_dict.entity_to_idx.get(x)
@@ -303,7 +300,7 @@ def decode_batch_results(user, item, rating, text, predicted_rating, predicted_c
             # real_context: no té sentit pq simplement son les paraules més freqüents del text
             'predicted_text': untokenized_predicted_text[i],
             'real_text': untokenized_text[i]
-            # Quan vaig copiar vectors directe vaig tenir un munt de problemes amb memòria GPU i memòria RAM:
+            # Quan vaig copiar vectors directe vaig tenir un munt de problemes amb memòria GPU i memòria RAM
         })
         batch_metrics.append({
             'tokens_predicted_text': decoded_predicted_text[i],
@@ -322,33 +319,7 @@ def get_RMSE_MAE(results, max_rating, min_rating):
     real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, predicted_ratings)]
 
     RMSE = root_mean_square_error(real_predicted_rating, max_rating, min_rating)
-    MAE = mean_absolute_error(real_predicted_rating, max_rating, min_rating).item() # this seems to be a tensor?
+    MAE = mean_absolute_error(real_predicted_rating, max_rating, min_rating).item() # si no torna un tensor
 
     return RMSE, MAE
     
-
-
-def compute_text_quality(results_metrics):
-
-    tokens_text_predicted = [result['tokens_predicted_text'] for result in results_metrics]
-    tokens_text_real = [result['tokens_real_text'] for result in results_metrics]
-    
-    # Pel BLEU necessito els tokens en la forma de llista de tokens com a string
-    BLEU1 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=1, smooth=False) # són en %
-    BLEU4 = bleu_score(tokens_text_real, tokens_text_predicted, n_gram=4, smooth=False)
-    
-    USR, USN = unique_sentence_percent(tokens_text_predicted)
-
-    predicted_text = [result['predicted_text'] for result in results_metrics]
-    real_text = [result['real_text'] for result in results_metrics]
-
-    # En canvi pel ROUGE necessito els texts passats a string real tot junt ja. Possiblement té més valor doncs?
-    ROUGE = rouge_score(real_text, predicted_text)  # a dictionary
-
-    return {
-        'BLEU-1': BLEU1,
-        'BLEU-4': BLEU4,
-        'USR': USR,
-        'USN': USN,
-        'ROUGE': ROUGE
-    }
