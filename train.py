@@ -217,13 +217,11 @@ if __name__ == "__main__":
     # Fer transfer learning de les word tokens (dels embeddings apresos) seria fàcil i es podria fer
     # En canvi els users i els items ja és molt més complicat i no val la pena intentar-ho
     
-    src_len = 2  # [u, i]
-    tgt_len = args.context_window + 1  # added <bos> or <eos>
     ntokens = len(data.token_dict)
     nuser = len(data.user_dict)
     nitem = len(data.item_dict)
 
-    mymodel = PETER(src_len, tgt_len, nuser, nitem, ntokens, args.emsize, args.nhead, args.nhid,
+    mymodel = PETER(args.context_window, nuser, nitem, ntokens, args.emsize, args.nhead, args.nhid,
                     args.nlayers, args.dropout, data.token_dict.pad).to(mydevice)
 
     ###############################################################################
@@ -235,7 +233,7 @@ if __name__ == "__main__":
 
     myloss_fn = lambda loss_input, loss_output: peter_loss(
         loss_input, loss_output, text_criterion, rating_criterion,
-        args.context_reg, args.text_reg, args.rating_reg, ntokens, tgt_len
+        args.context_reg, args.text_reg, args.rating_reg, ntokens, args.context_window
     )
 
     myoptimizer = torch.optim.SGD(mymodel.parameters(), lr=args.initial_lr) #, momentum=0.9) # de moment no li poso el momentum

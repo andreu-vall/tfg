@@ -19,9 +19,11 @@ from utils.module import PositionalEncoding, TransformerEncoderLayer, Transforme
 
 class PETER(nn.Module):
     # Crec que aquí hi ha masses arguments?
-    def __init__(self, src_len, tgt_len, nuser, nitem, ntoken, emsize, nhead, nhid, nlayers, dropout, pad_idx):
+    def __init__(self, context_window, nuser, nitem, ntoken, emsize, nhead, nhid, nlayers, dropout, pad_idx):
         super(PETER, self).__init__()
         self.pos_encoder = PositionalEncoding(emsize, dropout)  # emsize: word embedding size
+
+        self.context_window = context_window
 
         # ojo el dropout fa que sigui no deteministic?
 
@@ -56,19 +58,12 @@ class PETER(nn.Module):
         # should this work with indices or with entities??? i'm not sure
         # i think with indicies as the embeddings work with indices
 
-        self.ui_len = 2
-        self.src_len = src_len # source_length, és sempre 2 pq el que tinc sempre (source) és 2: user i item
-        # tgt_len target_length, la longitud del que vull predir, només ho usen per crear la màscara i ja!
         self.pad_idx = pad_idx
         self.emsize = emsize
 
-        # Encara he de mirar lo de les màscares. Aviam ja no es dirà aquest fitxer peter.py
+        self.attn_mask = PETER.generate_peter_mask(2 + context_window) # el +1 és pq ells tenien els paràmetres mal?
 
-        # LES 2 COSES QUE S'UTILITZEN PER CREAR LA MÀSCARA: src_len i tgt_len
-        print('src_len is', src_len) # 2 always
-        print('tgt_len is', tgt_len) # 6 (context_window +1)
-
-        self.attn_mask = PETER.generate_peter_mask(src_len + tgt_len) # el +1 és pq ells tenien els paràmetres mal?
+        print('self.attn_mask shape is', self.attn_mask.shape) # [7, 7] (2 + 5)
 
         self.init_weights() # Aquí és on es podria inicialitzar els embeddings de tokens pre-entrenats
     
@@ -76,9 +71,20 @@ class PETER(nn.Module):
     @staticmethod
     def generate_causal_mask(size):
         mask = torch.tril(torch.ones(size, size)) # LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOL
-        mask = mask == 0 # triu enlloc de tril m'ha fet perdre més de 1 hora inútilment!!!!
+        mask = mask == 0 # triu enlloc de tril m'ha fet perdre més de 2 hores inútilment!!!!
         return mask # maleït copilot!!!
 
+
+    # input size: 8
+    # context_window: 5
+    # extra: user, item, context
+
+    # output size: 8
+    # hidden[0]: rating
+    # hidden[1]: context
+    # hidden[2:7]: tokens 2-6 (5) N'HI HA 1 EXTRA?
+    # hidden[7] WTF is it?
+    
     @staticmethod
     def generate_peter_mask(size):
         mask = PETER.generate_causal_mask(size)
@@ -106,9 +112,12 @@ class PETER(nn.Module):
     # en realitat aquesta funció és pràcticament el mateix. La única diferència és que en la 2a no importa tota la
     # resta i només vols el que et dona la última hidden, la qual he vist que era de mida variable
     def predict_seq(self, hidden):
-        word_prob = self.hidden2token(hidden[self.src_len:])  # (tgt_len, batch_size, ntoken)
+        #print('predict_seq, right now hidden has shape', hidden.shape) # [6, 128, 512]
+        word_prob = self.hidden2token(hidden[2:])
+        #print('word_prob shape is', word_prob.shape) # [4, 128, 8631]
         log_word_prob = func.log_softmax(word_prob, dim=-1)
         return log_word_prob
+
 
     def generate_token(self, hidden):
         # print('generate_token, right now hidden has shape', hidden.shape) # [3, 128, 512] oh it do seems to be adapted?
@@ -120,33 +129,33 @@ class PETER(nn.Module):
 
 
     def forward(self, user, item, text, seq_prediction=True, context_prediction=True, rating_prediction=True):
-        '''
-        :param user: (batch_size,), torch.int64
-        :param item: (batch_size,), torch.int64
-        :param text: (total_len - ui_len, batch_size), torch.int64
-        :param seq_prediction: bool
-        :param context_prediction: bool
-        :param rating_prediction: bool
-        :return log_word_prob: target tokens (tgt_len, batch_size, ntoken) if seq_prediction=True; the last token (batch_size, ntoken) otherwise.
-        :return log_context_dis: (batch_size, ntoken) if context_prediction=True; None otherwise.
-        :return rating: (batch_size,) if rating_prediction=True; None otherwise.
-        :return attns: (nlayers, batch_size, total_len, total_len)
-        '''
 
         device = user.device
         batch_size = user.size(0)
 
-        # self.ui_len = 2
+        # print('self.context_window is', self.context_window) # 5
+        # print('text.size(0) is', text.size(0)) # 4 ara
+
         # text.size(0) mira quants tokens tens de l'input ja generats
         # per tant total_len és la suma de les coses pots mirar en qualsevol punt (perquè més endvant no tindria sentit mirar si no tens)
-        total_len = self.ui_len + text.size(0)  # deal with generation when total_len != src_len + tgt_len
+        total_len = 2 + text.size(0)  # deal with generation when total_len != src_len + tgt_len
         # see nn.MultiheadAttention for attn_mask and key_padding_mask
+
+        # Vull no calcular mai el context primer de tot
+        # This is why the attention mask is a square matrix of size 8x8
+
+        # But it could be of any shape not necessarily square
+
+
+
+        # print('attention mask shape is', self.attn_mask.shape) # [8, 8]
+        # print('total_len is', total_len) # 8
 
         # La màscara d'atenció és per dir-li a totes les coses que hi ha generades fins ara, a quines pot atendre en cada punt
         attn_mask = self.attn_mask[:total_len, :total_len].to(device)  # (total_len, total_len)
 
         # crec que la key_padding_mask bàscicament serviex per dir-li que no es fixi en els paddings per fer cap càlcul?
-        left = torch.zeros(batch_size, self.ui_len).bool().to(device)  # (batch_size, ui_len)
+        left = torch.zeros(batch_size, 2).bool().to(device)  # (batch_size, ui_len)
         right = text.t() == self.pad_idx  # replace pad_idx with True and others with False, (batch_size, total_len - ui_len)
         key_padding_mask = torch.cat([left, right], 1)  # (batch_size, total_len)
 
@@ -162,24 +171,14 @@ class PETER(nn.Module):
         src = src * math.sqrt(self.emsize)
         src = self.pos_encoder(src)
 
-        # Aquest és el primer pas clau de tots, aplicar el transformer a tot arreu. Perquè totes les altres coses
-        # les treuen a partir d'aquest encoding produït pel transformer. Sembla que és el tipus de transformer
-        # que codifica, i.e. el encoder only, no el encoder + decoder
-        # CREC QUE HE DE CANVIAR ALGO DE AQUÍ. I JA ESTÀ BÉ PQ SEGUEIXO APRENENT I AVANÇANT
-        # ARA JA HE DE MIRAR LO DE LA ATTN_MASK YAY. L'HE DE PROBABLY AMPLIAR EN 1?
-        # w_src ha augmentat la mida en 1
+        # src: user (1) + item (1) + 
+
+        # print('src shape is', src.shape) # [6, 128, 512]
+        # print('attn_mask shape is', attn_mask.shape) # [6, 6]
+        # print('key_padding_mask shape is', key_padding_mask.shape) # [128, 6]
+
+        # Depenent de la màscara d'atenció, el hidden serà més o menys llarg
         hidden, attns = self.transformer_encoder(src, attn_mask, key_padding_mask)
-        # (total_len, batch_size, emsize) vs. (nlayers, batch_size, total_len_tgt, total_len_src)
-
-        # Això és el més important de tot el model. Entendre aquesta línia és entendre els transformers
-        # i en què estan basats tots els avenços que s'estan fent en LLM i altres coses similars
-
-
-        # this code is really ugly ngl
-        # i tampoc s'entén del tot exactament el que estan fent
-
-        # train, test: model(user, item, text)
-        # -> Li p
 
         # generate first token: model(user, item, text, False) (és el seq_prediction)
         # generate an additional token: model(user, item, text, False, False, False) seq_predction, context_prediction, rating_prediction
@@ -190,7 +189,10 @@ class PETER(nn.Module):
             rating = self.predict_rating(hidden)  # (batch_size,)
         else:
             rating = None
-        
+
+        # log_context_dis = None
+
+        # He comentat fora la tasca de predir el context pq la volia borrar a veure què passava
         if context_prediction:
             log_context_dis = self.predict_context(hidden)  # (batch_size, ntoken)
         else:

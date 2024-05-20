@@ -135,7 +135,6 @@ if __name__ == "__main__":
     test_data = Subset(mydata, mysplitdata.test)
     mytest_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
     
-    tgt_len = args.context_window + 1 # exactly same as train now
     ntokens = len(mydata.token_dict)
 
     text_criterion = nn.NLLLoss(ignore_index=mydata.token_dict.pad)
@@ -143,7 +142,7 @@ if __name__ == "__main__":
 
     myloss_fn = lambda loss_input, loss_output: peter_loss(
         loss_input, loss_output, text_criterion, rating_criterion,
-        args.context_reg, args.text_reg, args.rating_reg, ntokens, tgt_len
+        args.context_reg, args.text_reg, args.rating_reg, ntokens, args.context_window
     )
     losses_dic, results, metrics = test(mytest_dataloader, mymodel, myloss_fn, mydevice, save_results=True, data=mydata)
     # test fent el save_results, en tokenizer-bert-base-uncased window_size=5: 42s (només cal tenir

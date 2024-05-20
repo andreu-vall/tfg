@@ -79,13 +79,15 @@ class EntityDict:
 
 # entity = token (as string), idx = token id
 class TokenDict(EntityDict):
-    def __init__(self, special_tokens, max_tokens):
+    def __init__(self, special_tokens, context_window):
         super().__init__()
         self.special_tokens = special_tokens # bos, eos, pad, unk, cut
+        self.context_window = context_window
+        self.extra_tokens = 2 # bos, eos
+        self.max_tokens = context_window - self.extra_tokens
+        print('context_window is', context_window, 'so max_tokens is', self.max_tokens)
         for token in special_tokens:
             self.add_entity(token)
-        self.max_tokens = max_tokens
-        print('context_window (max_tokens) is', max_tokens)
         
         self.bos, self.eos, self.pad, self.unk, self.cut = [self.entity_to_idx[token] for token in special_tokens]
 
