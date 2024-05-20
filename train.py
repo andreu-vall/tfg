@@ -20,7 +20,6 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, clip,
 
     total_losses = torch.zeros(4)
 
-    # mininterval de 1 segon pq no cal que es vagi actualitzant cada cop que fa un batch
     for batch in tqdm.tqdm(dataloader, position=1, mininterval=1, desc=f"Epoch {epoch} progress"):
 
         batch = [elem.to(device) for elem in batch] # moure a cuda
@@ -33,7 +32,7 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, clip,
         target_text = transposed_text[1:] # output text is shifted right
 
         predicted = model(user, item, input_text)
-        log_word_prob, log_context_dis, predicted_rating, attns = predicted # per si vull les atencions
+        log_word_prob, log_context_dis, predicted_rating, attns = predicted
 
         loss_input = [log_word_prob, log_context_dis, predicted_rating]
         loss_output = [target_text, rating]
@@ -79,8 +78,6 @@ def train(model, loss_fn, optimizer, train_dataloader, val_dataloader, max_epoch
     })
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, indent=4)
-    
-    learning_rate = optimizer.param_groups[0]['lr']
 
     with open(model_path, 'wb') as f:
         torch.save(model, f)
@@ -98,23 +95,23 @@ def train(model, loss_fn, optimizer, train_dataloader, val_dataloader, max_epoch
         metrics.append({
             "epoch": epoch,
             "time": epoch_time, # en segons
-            "learning_rate": learning_rate, #scheduler.get_last_lr()[0], # Torna mútliples grups de params
+            "learning_rate": optimizer.param_groups[0]['lr'], # Torna mútliples grups de params
             "train": train_losses,
             "valid": val_losses
         })
-        with open(metrics_path, 'w') as f: # Ho guardo cada vegada per si s'entrenament s'atura malament que quedi tot escrit, és poc
+        with open(metrics_path, 'w') as f: # Ho guardo cada vegada per si l'entrenament s'atura malament que quedi tot escrit, és poc
             json.dump(metrics, f, indent=4)
         #train_loss = train_losses['loss'] # de moment no la utilitzo per les decisions, crec que sempre s'anirà reduint aquest
 
         previous_val_loss = metrics[-2]['valid']['loss']
         new_val_loss = metrics[-1]['valid']['loss']
 
+        # WTF pq no ha entrat aquí? Si clarament empitjorava
         # si no millora més que el threshold, en particular si empitjora:
         improvement = (previous_val_loss - new_val_loss) / previous_val_loss # positiu si es redueix, negatiu si empitjora
         if improvement < lr_improv_threshold:
-            new_learning_rate = learning_rate * lr_decay_factor
-            optimizer.param_groups[0]['lr'] = new_learning_rate
-            if new_learning_rate < min_lr:
+            optimizer.param_groups[0]['lr'] *= lr_decay_factor
+            if optimizer.param_groups[0]['lr'] < min_lr:
                 break
         
         # qualsevol millora en el valid_loss la guardo a disc, pq a partir d'aquí potser empitjora
@@ -138,9 +135,9 @@ def parse_arguments():
     parser.add_argument('--initial_lr', type=float, default=1.0, help='initial learning rate') # Si learning_rate >= 1, matemàticament
     # no necessàriament hauria de convergir (suma inf teòrica), tot i que per jugar potser ho puc provar
     parser.add_argument('--lr_decay_factor', type=float, default=0.5, help='factor by which to decrease the learning rate') # peter tenia 0.25
-    parser.add_argument('--lr_improv_threshold', type=float, default=0.01, help='minimum improvement to keep the learning rate')
-    # en aquest anterior crec que serà interessant provar diferents valors
-    parser.add_argument('--min_lr', type=float, default=1e-6, help='minimum learning rate after which the training stops')
+    parser.add_argument('--lr_improv_threshold', type=float, default=0.02, help='minimum improvement to keep the learning rate') # 0.01?
+    # en aquest anterior crec que serà interessant provar diferents valors (més grans)
+    parser.add_argument('--min_lr', type=float, default=1/2**7, help='minimum learning rate after which the training stops')
 
     # Crec que és millor aturar amb el min_lr no amb un número de cops de reduir el learning_rate
     # parser.add_argument('--endure_times', type=int, default=5, help='the maximum endure times of loss increasing on validation')
@@ -207,7 +204,7 @@ if __name__ == "__main__":
     split_data = MySplitDataset(args.data_path, len(data), args.split_id, True)
 
     train_data = Subset(data, split_data.train)
-    mytrain_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
+    mytrain_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True) # is it using the torch seed?
 
     val_data = Subset(data, split_data.valid)
     myval_dataloader = DataLoader(val_data, batch_size=args.batch_size)

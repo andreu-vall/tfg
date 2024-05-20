@@ -146,7 +146,7 @@ def compute_text_quality(results_metrics):
 def parse_arguments():
     cmd_parser = argparse.ArgumentParser(description='Generate')
 
-    cmd_parser.add_argument('id', type=str, help='model id')
+    cmd_parser.add_argument('train_id', type=str, help='model id')
     cmd_parser.add_argument('result_id', type=str, help='result id')
 
     cmd_parser.add_argument('--top_k_sample', type=int, help='top k sampling', default=1) # 1=greedy, >1=sampling
@@ -157,11 +157,11 @@ def parse_arguments():
     cmd_parser.add_argument('--cpu', action='store_true', help='don\'t use CUDA')
     cmd_args = cmd_parser.parse_args()
 
-    path = f"out/{cmd_args.id}"
+    path = f"out/{cmd_args.train_id}"
     if not os.path.exists(path):
         raise ValueError('This id doesn\'t exist!')
     
-    base_path = f"out/{cmd_args.id}/results"
+    base_path = f"out/{cmd_args.train_id}/results"
     if not os.path.exists(base_path):
         os.makedirs(base_path)
     result_path = f"{base_path}/{cmd_args.result_id}.json"
@@ -180,7 +180,7 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
     
-    path = os.path.join('out', args.id)
+    path = os.path.join('out', args.train_id)
     record_execution(path)
 
     mydevice = torch.device('cuda' if not args.cpu else 'cpu')
@@ -218,7 +218,7 @@ if __name__ == "__main__":
         "metrics": metrics_json,
         "results": results
     }
-    with open(f"out/{args.id}/results/{args.result_id}.json", 'w') as f:
+    with open(f"out/{args.train_id}/results/{args.result_id}.json", 'w') as f:
         json.dump(generate_json, f, indent=4)
     
     # Demà dilluns ja no afegiré cap funcionalitat més. He d'escriure ja la memòria, que si no no tindré
