@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as func
 
+# Sembla que havia desgraciat algo somehow en en peter_model
+
 # Aquest és el de torch. M'és útil el codi si el miro, si no és millor usar simplement
 # l'oficial i ja. Però crec que precisament tenir aquestes coses m'ajuden molt per veure
 # jo com funcionen els transformers aquests
@@ -66,30 +68,21 @@ class PETER(nn.Module):
         print('src_len is', src_len) # 2 always
         print('tgt_len is', tgt_len) # 6 (context_window +1)
 
-        # Damn
-        self.attn_mask = PETER.generate_andreu_mask(src_len + tgt_len) # el +1 és pq ells tenien els paràmetres mal?
-        
-        # if peter_mask: # Crec que hauria de començar ja a tocar les màscares d'atenció, i sobretot hauria ja
-        #     # d'anar avançant la memòria, ni que siguin versions tontes en brut, perquè sinó arribaran les
-        #     # pròximes reunions i no tindré res fet i m'estressaré i tot anirà malament. No cal que faci un
-        #     # treball de 10, de fet és possible que ja no pugui aconseguir un treball de 10, però com a mínim
-        #     # he de fer un treball que de moment no tinc res fet. De fet la nota no m'importa massa, però
-        #     # hauria d'acabar el treball que és el que volen en la uni fer tenir tots els graus
-        #     self.attn_mask = generate_peter_mask(src_len, tgt_len)
-        #     print("s'ha creat la màscara ja, amb el generate_peter_mask")
-        # else:
-        #     assert False
-        #     self.attn_mask = generate_square_subsequent_mask(src_len + tgt_len)
-        #     print("ups, era en square???")
+        self.attn_mask = PETER.generate_peter_mask(src_len + tgt_len) # el +1 és pq ells tenien els paràmetres mal?
 
         self.init_weights() # Aquí és on es podria inicialitzar els embeddings de tokens pre-entrenats
-
+    
 
     @staticmethod
-    def generate_andreu_mask(size):
-        mask = torch.tril(torch.ones(size, size))
-        mask = mask == 0
-        mask[0, 1] = False # allow to attend for user and item
+    def generate_causal_mask(size):
+        mask = torch.tril(torch.ones(size, size)) # LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOL
+        mask = mask == 0 # triu enlloc de tril m'ha fet perdre més de 1 hora inútilment!!!!
+        return mask # maleït copilot!!!
+
+    @staticmethod
+    def generate_peter_mask(size):
+        mask = PETER.generate_causal_mask(size)
+        mask[0, 1] = False # allow the first hidden position to attend both user and item for rating prediction
         return mask
 
 
