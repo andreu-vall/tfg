@@ -79,13 +79,10 @@ class EntityDict:
 
 # entity = token (as string), idx = token id
 class TokenDict(EntityDict):
-    def __init__(self, special_tokens, context_window):
+    def __init__(self, special_tokens, max_tokens):
         super().__init__()
         self.special_tokens = special_tokens # bos, eos, pad, unk, cut
-        self.context_window = context_window
-        self.extra_tokens = 2 # bos, eos
-        self.max_tokens = context_window - self.extra_tokens
-        print('context_window is', context_window, 'so max_tokens is', self.max_tokens)
+        self.max_tokens = max_tokens
         for token in special_tokens:
             self.add_entity(token)
         
@@ -141,16 +138,6 @@ class TokenDict(EntityDict):
                 termination_idx = len(token_ids)
 
         return [self.idx_to_entity[token_id] for token_id in token_ids[1:termination_idx]]
-        
-
-        # # el cut només té sentit predir-lo al final de tot
-        # elif self.cut in token_ids: # tècnicament el cut només hauria de poder ser al final
-        #     termination_idx = token_ids.index(self.cut) + 1 # pq es vegi en el text que ha sigut tallat?
-        # else:
-        #     if mode 
-        #     assert False, "No eos or cut token found"
-        
-        # return [self.idx_to_entity[token_id] for token_id in token_ids[1:termination_idx]]
     
     
     def keep_most_frequent(self, vocab_size):
@@ -161,10 +148,9 @@ class TokenDict(EntityDict):
 # user, item, rating, text
 class MyDataset(Dataset):
 
-    def __init__(self, data_path, tokenizer, context_window):
+    def __init__(self, data_path, tokenizer, max_tokens):
 
-        self.context_window = context_window
-        # self.text_vocab_size = text_vocab_size
+        self.max_tokens = max_tokens # sense comptar el <bos> i <eos>
 
         # 1, load the users, items, ratings and text dataset
         original_data = pd.read_csv(data_path + '/reviews.csv')
@@ -182,7 +168,7 @@ class MyDataset(Dataset):
         original_data["item"].apply(self.item_dict.add_entity)
 
         special_tokens = ["<bos>", "<eos>", "<pad>", "<unk>", "<cut>"]
-        self.token_dict = TokenDict(special_tokens, self.context_window)
+        self.token_dict = TokenDict(special_tokens, self.max_tokens)
         original_data["tokenized_text"].apply(self.token_dict.add_sentence)
 
         # here the optative vocab size would be applied. Però crec que MAI no m'interessa limitar el vocabulari de res
@@ -317,25 +303,24 @@ def get_RMSE_MAE(results, max_rating, min_rating):
 
     predicted_ratings = [result['predicted_rating'] for result in results]
     real_ratings = [result['real_rating'] for result in results]
-
     real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, predicted_ratings)]
 
     RMSE = root_mean_square_error(real_predicted_rating, max_rating, min_rating)
-    MAE = mean_absolute_error(real_predicted_rating, max_rating, min_rating).item() # si no torna un tensor
-    #1234 comentat ara lo del tensor pq ara em peta
+    MAE = mean_absolute_error(real_predicted_rating, max_rating, min_rating).item()
+    # si es comenta la predicció de rating, aleshores no serà un tensor i la MAE petarà
 
     return RMSE, MAE
     
 
-from torch.utils.data import DataLoader, Subset
+# from torch.utils.data import DataLoader, Subset
 
-def get_batch_for_test_purposes(data_path='data/amz-beauty-review', split_id='split_id_1', tokenizer='tokenizer-bert-base-uncased',
-                                context_window=10, batch_size=128):
+# def get_batch_for_test_purposes(data_path='data/amz-beauty-review', split_id='split_id_1',
+#                                 tokenizer='tokenizer-bert-base-uncased', max_tokens=10, batch_size=128):
     
-    data = MyDataset(data_path, tokenizer, context_window)
-    split = MySplitDataset(data_path, len(data), split_id, load_split=True)
-    train_data = Subset(data, split.train)
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
-    first_batch = next(iter(train_dataloader))
-    return first_batch, data
+#     data = MyDataset(data_path, tokenizer, max_tokens)
+#     split = MySplitDataset(data_path, len(data), split_id, load_split=True)
+#     train_data = Subset(data, split.train)
+#     train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
+#     first_batch = next(iter(train_dataloader))
+#     return first_batch, data
 

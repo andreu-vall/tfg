@@ -90,9 +90,9 @@ def generate_batch(model:nn.Module, bos_idx, max_length, top_k_sample, num_beams
 def generate(data:MyDataset, dataloader, model:PETER, device, top_k_sample, num_beams, target_length):
 
     if target_length is None: # potser hauria d'adclarir en execució script que si no s'pesecifica s'usa la shape del model
-        target_length = data.context_window
+        target_length = data.max_tokens
     else:
-        assert target_length <= data.context_window, "target_length should be less or equal to the context_window"
+        assert target_length <= data.max_tokens, "target_length should be less or equal to the context_window"
         # technically it could be less, but then the model would "forget" what it has said itself, because it doesn't
         # have the capacity to process such a long input in it's architecture
 
@@ -206,7 +206,7 @@ if __name__ == "__main__":
     with open(model_path, 'rb') as f:
         mymodel = torch.load(f).to(mydevice)
 
-    mydata = MyDataset(args.data_path, args.tokenizer, args.context_window)
+    mydata = MyDataset(args.data_path, args.tokenizer, args.max_tokens)
     mysplitdata = MySplitDataset(args.data_path, len(mydata), args.split_id, True)
 
     test_data = Subset(mydata, mysplitdata.test)

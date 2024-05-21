@@ -19,7 +19,7 @@ from utils.module import PositionalEncoding, TransformerEncoderLayer, Transforme
 
 class PETER(nn.Module):
     # Crec que aquí hi ha masses arguments?
-    def __init__(self, context_window, nuser, nitem, ntoken, emsize, nhead, nhid, nlayers, dropout, pad_idx):
+    def __init__(self, max_tokens, nuser, nitem, ntoken, emsize, nhead, nhid, nlayers, dropout, pad_idx):
         super(PETER, self).__init__()
         self.pos_encoder = PositionalEncoding(emsize, dropout)  # emsize: word embedding size
 
@@ -49,124 +49,80 @@ class PETER(nn.Module):
         self.hidden2token = nn.Linear(emsize, ntoken)
         self.recommender = MLP(emsize, emsize) # old: MLP(emsize)
 
-        # quina diferència hi ha amb ui_len???
-        # src_len, s'usa per: crear màscara atenció (de src_len + tgt_len), en el predict_seq per saber a partir de on es descodificaran tokens
-        # tgt_len, s'usa per: crear màscara atenció (de src_len + tgt_len) i ja està!!!!!
-        # LOL pràcticament només li crees la màscara d'atenció i el torch transformers ja t'ho fan tot xD
-
-        # should this work with indices or with entities??? i'm not sure
-        # i think with indicies as the embeddings work with indices
-
         self.pad_idx = pad_idx
         self.emsize = emsize
 
-        # Ara amb això puc teòricament modificar-ho com vulgui. Puc canviar el input i/o el output
-        # self.attn_mask = PETER.generate_andreu_mask(2, 2, context_window) # aquest funciona
-        # PETER: generate_peter_mask(2 + context_window)
-
-        # modificació 1: considerar el rating com a input enlloc de output
-        # AIXÒ SEMPRE EM FA UNA MÀSCARA QUADRADA
-        self.input_only_size = 2 + 1 # user, item + rating
-        self.output_only_size = 2 - 1 # rating, context - rating
-        self.context_window = context_window # text[:-1] and text[1:]
+        self.always_visible_input = 2 + 1 # user, item + rating
         
-        self.falsos_hidden = 2
-        self.attn_mask = PETER.generate_andreu_mask(self.input_only_size, self.input_only_size, self.context_window)
+        # text[:-1] and text[1:] size. Meaning +2 of <bos>, <eos> and -1 of the shift right for fully causal
+        self.context_window = max_tokens + 1
+        print(f'max_tokens is {max_tokens}, so context_window is {self.context_window}')
 
-        self.init_weights() # Aquí és on es podria inicialitzar els embeddings de tokens pre-entrenats
+        self.attn_mask = PETER.generate_andreu_mask(self.always_visible_input, self.context_window)
+
+        self.init_weights() # Aquí és on es podria inicialitzar els embeddings de tokens pre-entrenats o d'un altre dataset
 
 
+    # És una attention_mask. Això vol dir que en els llocs on posis True, es bloquejarà l'atenció, per tant no es consderarà
+    # Per tant els False significa que són les posicions que sí que es tinran en compte
     @staticmethod
     def generate_causal_mask(size):
         mask = torch.tril(torch.ones(size, size)) # LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOL
-        mask = mask == 0 # triu enlloc de tril m'ha fet perdre més de 2 hores inútilment!!!!
-        return mask # maleït copilot!!!
+        mask = mask == 0 # triu enlloc de tril del copilot m'ha fet perdre més de 2 hores inútilment!!!!
+        return mask # hauria de vigilar més amb les coses omplertes pel copilot, i seguir provar que tot funcioni més sovint
+    # i sobretot abans de posar-me a fer canvis molt grans que em poden trencar tot i que després no tindré ni idea d'on ve l'error
     
-    @staticmethod
-    def generate_peter_mask(size):
-        mask = PETER.generate_causal_mask(size)
-        mask[0, 1] = False
-        return mask
+    # @staticmethod
+    # def generate_peter_mask(size):
+    #     mask = PETER.generate_causal_mask(size)
+    #     mask[0, 1] = False
+    #     return mask
 
     @staticmethod
-    def generate_andreu_mask(input_only_size, output_only_size, context_window):
-        mask = torch.full((input_only_size + context_window, output_only_size + context_window), True) # block everything
-        mask[:, :input_only_size] = False # input part is always visible
+    def generate_andreu_mask(always_visible_input, context_window):
+        mask_size = always_visible_input + context_window
+        mask = torch.full((mask_size, mask_size), True) # block the text in the unused hidden states
+        mask[:, :always_visible_input] = False # input part is always visible (if I want to use it in the unused states)
         causal_mask = PETER.generate_causal_mask(context_window) # usual causal mask, context_window x context_window
-        mask[input_only_size:, output_only_size:] = causal_mask
+        mask[always_visible_input:, always_visible_input:] = causal_mask
         return mask
-
-
-    # input size: 8
-    # context_window: 5
-    # extra: user, item, context
-
-    # output size: 8
-    # hidden[0]: rating
-    # hidden[1]: context
-    # hidden[2:7]: tokens 2-6 (5) N'HI HA 1 EXTRA?
-    # hidden[7] WTF is it?
-    
 
 
     def init_weights(self):
-        initrange = 0.1 # aquí es podria plantejar de inicar els token embeddings pre-entrenats d'un altre model
-        self.user_embeddings.weight.data.uniform_(-initrange, initrange) # o inclús del mateix entrenat per un altre dataset
+        initrange = 0.1
+        self.user_embeddings.weight.data.uniform_(-initrange, initrange)
         self.item_embeddings.weight.data.uniform_(-initrange, initrange)
         self.token_embeddings.weight.data.uniform_(-initrange, initrange)
         self.hidden2token.weight.data.uniform_(-initrange, initrange)
         self.hidden2token.bias.data.zero_()
 
+    # ara ja podré comparar si tenir això realment aporta gaire. Si fos molt útil, potser valdria la pena
     def predict_context(self, hidden):
-        context_prob = self.hidden2token(hidden[self.falsos_hidden])  # (batch_size, ntoken)
+        context_prob = self.hidden2token(hidden[0]) # podria usar qualsevol dels 3 primers que són inútils
+        # crec que l'únic pel que serveix aquesta tasca és per modificar els embeddings per predir més les paraules comunes?
         log_context_dis = func.log_softmax(context_prob, dim=-1)
         return log_context_dis
 
+    # el recomanador també podria comparar les 2 versions
     # def predict_rating(self, hidden):
     #     rating = self.recommender(hidden[0])  # (batch_size,)
     #     return rating
 
-    # en realitat aquesta funció és pràcticament el mateix. La única diferència és que en la 2a no importa tota la
-    # resta i només vols el que et dona la última hidden, la qual he vist que era de mida variable
     def predict_seq(self, hidden):
-        #print('predict_seq, right now hidden has shape', hidden.shape) # [6, 128, 512]
-        word_prob = self.hidden2token(hidden[self.falsos_hidden+1:])
-        #print('word_prob shape is', word_prob.shape) # [4, 128, 8631]
+        word_prob = self.hidden2token(hidden[self.always_visible_input:])
         log_word_prob = func.log_softmax(word_prob, dim=-1)
         return log_word_prob
-
 
     def generate_token(self, hidden):
-        # print('generate_token, right now hidden has shape', hidden.shape) # [3, 128, 512] oh it do seems to be adapted?
-        # # [?, batch_size, emsize]
-        # assert False
-        word_prob = self.hidden2token(hidden[-1])  # (batch_size, ntoken)
+        word_prob = self.hidden2token(hidden[-1])
         log_word_prob = func.log_softmax(word_prob, dim=-1)
         return log_word_prob
 
 
-    # PETER
-    # input: user, item, text (minus last token) [1 + 1 + context_window - 1]
-    # output: rating, context, text (shifted right, minus first token) [1 + 1 + context_window - 1]
-    # user s'alinea amb rating, item amb context i per això la màscara és quadrada
-    # Per tant [context_window + 1, context_window + 1] de attn_mask
-
-    # Step intermig: borrar la predicció del context (la hidden que la prediu, per tant modificant 1 dimensió del output).
-    # Perquè quedi tot ben alineat potser tb hauria de borrar user, item?
-
-    # Andreu
-    # Per tant hi ha 2 extres que només tenen sentit en el input: user i item
-
-    # input: user, item, rating, context, text (minus last token) [1 + 1 + 1 + context_window + 1 - 1]
-    # output: rating, context, text (shifted right, minus first token) [1 + 1 + context_window + 1 - 1]
-    # Per taint [context_window + 3, context_window + 1] de attn_mask
-
-    # Podria treure 1 de input i un de output i tenir la màscara de mida 1, 1 menys per exemple primer de tot?
-    # O 
-
-    # Per tant el step 1 serà deixar de predir rating i context i predir directament el text
-
     def forward(self, user, item, rating, text, mode):
+        
+        assert mode in ['parallel', 'sequential'], "Mode must be either 'parallel' or 'sequential'"
+
         device = user.device
         batch_size = user.size(0)
         text_size = text.size(0)
@@ -174,121 +130,49 @@ class PETER(nn.Module):
         user_embed = self.user_embeddings(user)
         item_embed = self.item_embeddings(item)
 
-        # Sempre en qualsevol cas primer faré la predicció de rating 
-        # LOL donar tot 5's només és una loss de 1.9793450832366943
-        # i donant tot 5's dona 1.3801511526107788
-
-        # WTF amb 1 època ha augmentat el rating_loss???? Quin sentit té, es contraposa usar els embeddings
-        # en un lloc i un altre? Kinda estrany que vagi a pitjor, no?
         predicted_rating = self.recommender(user_embed, item_embed)
-        #predicted_rating = torch.full((batch_size,), 4, dtype=torch.float32).to(device)
-
-        # La diferència és només que en mode parallel posaré de input del transformer el rating real
-        transformer_rating = rating if mode=='parallel' else predicted_rating
-
-        value = self.falsos_hidden + 1 + text_size
-
-        attn_mask = self.attn_mask[:value, :value].to(device)
-
-        r_src = transformer_rating.view(1, batch_size, -1).expand(-1, -1, 512).to(device) # suggerit by copilot (expand it, repeat gasta memòria)
-        w_src = self.token_embeddings(text)
         
+        # En model paral·lel pel transformer s'usa el rating real
+        if mode=='parallel':
+            assert rating is not None
+            transformer_rating = rating
+        else:
+            transformer_rating = predicted_rating
+        
+
+        # Cal veure si realment la tasca de predicció de context és útil o no
+        # Si no es realment molt útil preferia borrar-la, o com a mínim donar-li menys pes.
+        # Pel que estic veient ara l'únic que serveix és per predir les paraules més comunes...
+        # Si s'utilitza tant sols així la veritat és que sembla molt poc útil. Si realment vulgúes
+        # que fos útil hauria de predir les paraules clau més important de la review
+
+        # ----------------------- El transformer -----------------------
+
         u_src = user_embed.unsqueeze(0)
         i_src = item_embed.unsqueeze(0)
+        r_src = transformer_rating.view(1, batch_size, -1).expand(-1, -1, self.emsize)
+        w_src = self.token_embeddings(text)
 
         src = torch.cat([u_src, i_src, r_src, w_src], 0)
         src = src * math.sqrt(self.emsize)
         src = self.pos_encoder(src)
 
-        # ara el falta la key_padding_mask, yikes. De moment no la poso
-        # Ara segurament ja seria hora de fer-ho!
+        my_size = self.always_visible_input + text_size # mida que ara mateix tinc disponible a mirar
+        attn_mask = self.attn_mask[:my_size, :my_size].to(device)
 
-        left = torch.zeros(batch_size, 2).bool().to(device)
-        right = text.t() == self.pad_idx
-        key_padding_mask = torch.cat([left, right], 1)
-
-        # lo important era el: value = self.falsos_hidden (2) + 1 + text_size
-        # simplement és marcar en quines posicions hi ha padding pq no influeixin en el càlcul del transformer
-
-
-        hidden, attns = self.transformer_encoder(src, attn_mask)
-
-        log_context_dis = self.predict_context(hidden)
-
-        if mode=='parallel':
-            log_word_prob = self.predict_seq(hidden)
-        elif mode=='sequential':
-            log_word_prob = self.generate_token(hidden)
-        else:
-            raise ValueError('mode should be either parallel or sequential')
-        
-        return log_word_prob, log_context_dis, predicted_rating, attns
-
-        
-
-    def forward2(self, user, item, text, seq_prediction=True, context_prediction=True, rating_prediction=True):
-
-        device = user.device
-        batch_size = user.size(0)
-        
-        total_len = 2 + text.size(0)
-
-        # ara he de triar la màscara diferent
-
-        attn_mask = self.attn_mask[:total_len, :total_len].to(device)  # (total_len, total_len)
-
-        left = torch.zeros(batch_size, 2).bool().to(device)
-        right = text.t() == self.pad_idx
-        key_padding_mask = torch.cat([left, right], 1)
-
-
-
-        # src és molt senzill, és posar-li lo de la posició i canviar els ID's per els embeddings,
-        # on al principi són coses aleatòries però es van entrenant junt amb el model per intentar
-        # minimitzar la funció de loss que vulguis definir, la qual el torch va guardant-se les
-        # coses i steps i fa la derivada automàticament, niceee
-        u_src = self.user_embeddings(user.unsqueeze(0))  # (1, batch_size, emsize) # ups havia borrat aquest línia
-        # sense volguer, ojo que no me l'hagi carregat que no crec pq era molt senzilla
-        i_src = self.item_embeddings(item.unsqueeze(0))  # (1, batch_size, emsize)
-        w_src = self.token_embeddings(text)  # (total_len - ui_len, batch_size, emsize)
-        src = torch.cat([u_src, i_src, w_src], 0)  # (total_len, batch_size, emsize)
-        src = src * math.sqrt(self.emsize)
-        src = self.pos_encoder(src)
-
-        # attn_mask, 1=block the attention
-        # key_padding_mask, 1=block the attention, due to padding reasons
-
-        # Documentació de transformer_encoder:
-        # src: the sequence to the encoder (required).
-        # mask: the mask for the src sequence (optional).
-        # src_key_padding_mask: the mask for the src keys per batch (optional).
-
-        # en la traducció o sumarització evidentment pots mirar a tot arreu de l'input
-        # però en la tasca de generació de text només pots mirar a les paraules anteriors,
-        # perquè quan generis nou text només tindràs les posicions anteriors
+        key_padding_mask = torch.full((batch_size, my_size), False, dtype=torch.bool, device=device)
+        key_padding_mask[:, self.always_visible_input:] = text.t() == self.pad_idx
 
         hidden, attns = self.transformer_encoder(src, attn_mask, key_padding_mask)
 
+        # encara he de veure si el context realment és útil per algo. Ara més aviat està predint només stop words...
+        log_context_dis = self.predict_context(hidden)
 
-        if rating_prediction:
-            rating = self.predict_rating(hidden)  # (batch_size,)
+        # És molt similar, l'única diferència és que el predict_seq ho fa per tots i el generate_token només per l'últim
+        if mode=='parallel':
+            log_word_prob = self.predict_seq(hidden)
         else:
-            rating = None
-
-        # log_context_dis = None
-
-        # He comentat fora la tasca de predir el context pq la volia borrar a veure què passava
-        if context_prediction:
-            log_context_dis = self.predict_context(hidden)  # (batch_size, ntoken)
-        else:
-            log_context_dis = None
+            log_word_prob = self.generate_token(hidden)
         
-        # usa tots els hidden alhora i descodifica totes les paraules en paral·lel. Per tant, si es descodifiqués
-        # totes les paraules inidivualment probablement no tindrien coherència juntes, ja que s'han generat de
-        # manera independent
-        if seq_prediction:
-            log_word_prob = self.predict_seq(hidden)  # (tgt_len, batch_size, ntoken)
+        return log_word_prob, log_context_dis, predicted_rating, attns
 
-        else: # La qüestió és que la mida de hidden va canviant!
-            log_word_prob = self.generate_token(hidden)  # (batch_size, ntoken)
-        return log_word_prob, log_context_dis, rating, attns

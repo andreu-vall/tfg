@@ -126,7 +126,8 @@ def parse_arguments():
 
     parser.add_argument('data_path', type=str, help='path for loading the pickle data')
     parser.add_argument('tokenizer', choices=['tokenizer-bert-base-uncased'], help='tokenizer to use')
-    parser.add_argument('context_window', type=int) # és molt important
+    parser.add_argument('max_tokens', type=int, help='real tokens without counting <bos> and <eos>')
+    #parser.add_argument('context_window', type=int) # és molt important
     parser.add_argument('split_id', type=str, help='load indexes')
     parser.add_argument('train_id', type=str, help='model id')
 
@@ -135,9 +136,15 @@ def parse_arguments():
     parser.add_argument('--initial_lr', type=float, default=1.0, help='initial learning rate') # Si learning_rate >= 1, matemàticament
     # no necessàriament hauria de convergir (suma inf teòrica), tot i que per jugar potser ho puc provar
     parser.add_argument('--lr_decay_factor', type=float, default=0.5, help='factor by which to decrease the learning rate') # peter tenia 0.25
-    parser.add_argument('--lr_improv_threshold', type=float, default=0.02, help='minimum improvement to keep the learning rate') # 0.01?
+    
+    # AVIAM PROVO DE REDUIR-HO MOLT MÉS PQ ES COMENCI ABANS A REDUIR EL LEARN RATE
+    # CREC QUE ENCARA EL PUC AUGMENTAR BASTANT MÉS, O ALTERNATIVAMENT COMPARAR TANT EL IMPROVEMENT EN TRAIN COM VALID
+    # PER VEURE SI ESTÀ OVERFITTING
+    parser.add_argument('--lr_improv_threshold', type=float, default=0.05, help='minimum improvement to keep the learning rate') # 0.01?
+    # si no es redueix la loss en un 2.5% redueixo a la meitat el learning_rate. Crec que estaria bé tmb veure
+    # el del tranining, però sembla que no és gaire comú
     # en aquest anterior crec que serà interessant provar diferents valors (més grans)
-    parser.add_argument('--min_lr', type=float, default=1/2**7, help='minimum learning rate after which the training stops')
+    parser.add_argument('--min_lr', type=float, default=1/2**8, help='minimum learning rate after which the training stops')
 
     # Crec que és millor aturar amb el min_lr no amb un número de cops de reduir el learning_rate
     # parser.add_argument('--endure_times', type=int, default=5, help='the maximum endure times of loss increasing on validation')
@@ -201,7 +208,7 @@ if __name__ == "__main__":
     # puc posar my als que es passen com variables per assegurar que no siguin globals
     # la resta no cal. i un cop vegi que no es passen globals ja no caldria tampoc els my
 
-    data = MyDataset(args.data_path, args.tokenizer, args.context_window) #, args.text_vocab_size)
+    data = MyDataset(args.data_path, args.tokenizer, args.max_tokens)
 
     split_data = MySplitDataset(args.data_path, len(data), args.split_id, True)
 
@@ -223,7 +230,7 @@ if __name__ == "__main__":
     nuser = len(data.user_dict)
     nitem = len(data.item_dict)
 
-    mymodel = PETER(args.context_window, nuser, nitem, ntokens, args.emsize, args.nhead, args.nhid,
+    mymodel = PETER(args.max_tokens, nuser, nitem, ntokens, args.emsize, args.nhead, args.nhid,
                     args.nlayers, args.dropout, data.token_dict.pad).to(mydevice)
 
     ###############################################################################
@@ -235,7 +242,7 @@ if __name__ == "__main__":
 
     myloss_fn = lambda loss_input, loss_output: peter_loss(
         loss_input, loss_output, text_criterion, rating_criterion,
-        args.context_reg, args.text_reg, args.rating_reg, ntokens, args.context_window
+        args.context_reg, args.text_reg, args.rating_reg, ntokens
     )
 
     myoptimizer = torch.optim.SGD(mymodel.parameters(), lr=args.initial_lr) #, momentum=0.9) # de moment no li poso el momentum

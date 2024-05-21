@@ -62,7 +62,7 @@ def test(dataloader:DataLoader, model, loss_fn, device, save_results=False, data
             # LOL al final el que s'optimitza del text només és un classificador de les probabilitats de les paraules
             # tècnicament pel test es podria usar sampling enlloc de tot greedy? o llavors no tindria tant sentit?
 
-            predicted_context = get_topk_tokens(log_context_dis, topk=data.context_window)
+            predicted_context = get_topk_tokens(log_context_dis, topk=data.max_tokens)
 
             word_prob = log_word_prob.exp() # [6, 128, 9994]
             word_idx = torch.argmax(word_prob, dim=2) # [6, 128] (greedy decode)
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     with open(model_path, 'rb') as f:
         mymodel = torch.load(f).to(mydevice)
 
-    mydata = MyDataset(args.data_path, args.tokenizer, args.context_window)
+    mydata = MyDataset(args.data_path, args.tokenizer, args.max_tokens)
     mysplitdata = MySplitDataset(args.data_path, len(mydata), args.split_id, load_split=True)
 
     test_data = Subset(mydata, mysplitdata.test)
@@ -142,7 +142,7 @@ if __name__ == "__main__":
 
     myloss_fn = lambda loss_input, loss_output: peter_loss(
         loss_input, loss_output, text_criterion, rating_criterion,
-        args.context_reg, args.text_reg, args.rating_reg, ntokens, args.context_window
+        args.context_reg, args.text_reg, args.rating_reg, ntokens
     )
     losses_dic, results, metrics = test(mytest_dataloader, mymodel, myloss_fn, mydevice, save_results=True, data=mydata)
     # test fent el save_results, en tokenizer-bert-base-uncased window_size=5: 42s (només cal tenir
