@@ -44,14 +44,31 @@ def generate_batch(model:nn.Module, bos_idx, max_length, top_k_sample, num_beams
 
     for step in range(max_length):
 
-        # step 0: es calcula el rating, el context i el 1r token (a partir de <bos>)
-        if step == 0:
-            log_word_prob, log_context_dis, rating, _ = model(user, item, text, False)
-            context = get_topk_tokens(log_context_dis, topk=max_length)
+        #falta implementar el generate amb el nou forward. Cal decidir exactament com ho vull fer i fer-ho
+
+        # l'hauré de cridar ara amb el mode='sequential'
         
-        # step > 0: se li introdueix el seu text que havia generat fins ara i genera 1 token més
+        # probably no funcioni encara
+
+        # posat el rating com a None? Potser l'hauria de calcular la primera vegada i després passar-li
+        # el propi rating que he calculat en la primera iteració?
+
+        if step == 0:
+            log_word_prob, log_context_dis, rating, _ = model(user, item, None, text, 'sequential')
+            context = get_topk_tokens(log_context_dis, topk=max_length)
         else:
-            log_word_prob, _, _, _ = model(user, item, text, False, False, False)
+            log_word_prob, _, _, _ = model(user, item, None, text, 'sequential')
+
+
+
+        # step 0: es calcula el rating, el context i el 1r token (a partir de <bos>)
+        # if step == 0:
+        #     log_word_prob, log_context_dis, rating, _ = model(user, item, text, False)
+        #     context = get_topk_tokens(log_context_dis, topk=max_length)
+        
+        # # step > 0: se li introdueix el seu text que havia generat fins ara i genera 1 token més
+        # else:
+        #     log_word_prob, _, _, _ = model(user, item, text, False, False, False)
 
         # squeeze: elimina dimensions de mida 1
         # unsqueeze: afegeix dimensions de mida 1¡
@@ -199,7 +216,8 @@ if __name__ == "__main__":
     # Sembla que funciona, amb 2 iteracions diferents ha generat exactament el mateix text, nicee
     torch.manual_seed(args.seed)
 
-    parameters, metrics, results = generate(mydata, test_dataloader, mymodel, mydevice, args.top_k_sample, args.num_beams, args.target_length)
+    parameters, metrics, results = generate(mydata, test_dataloader, mymodel, mydevice,
+                                            args.top_k_sample, args.num_beams, args.target_length)
 
     RMSE, MAE = get_RMSE_MAE(results, mydata.max_rating, mydata.min_rating)
 

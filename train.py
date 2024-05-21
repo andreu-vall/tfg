@@ -31,7 +31,7 @@ def train_epoch(dataloader: DataLoader, model, loss_fn, optimizer, device, clip,
         input_text = transposed_text[:-1]
         target_text = transposed_text[1:] # output text is shifted right
 
-        predicted = model(user, item, input_text)
+        predicted = model(user, item, rating, input_text, mode='parallel') #1234
         log_word_prob, log_context_dis, predicted_rating, attns = predicted
 
         loss_input = [log_word_prob, log_context_dis, predicted_rating]
@@ -145,9 +145,11 @@ def parse_arguments():
     # també podria provar amb el momentum, que el exemple oficial de torch l'utilitzaven i potser sigui millor així
 
     # Aquestes tres crec que també són molt importants per definir a què li dona importància el teu model quan aprèn
-    parser.add_argument('--rating_reg', type=float, default=0.1, help='regularization on recommendation task')
-    parser.add_argument('--context_reg', type=float, default=1.0, help='regularization on context prediction task')
-    parser.add_argument('--text_reg', type=float, default=1.0, help='regularization on text generation task')
+    parser.add_argument('--rating_reg', type=float, default=0.5, help='regularization on recommendation task')
+    parser.add_argument('--context_reg', type=float, default=0.2, help='regularization on context prediction task')
+    parser.add_argument('--text_reg', type=float, default=1, help='regularization on text generation task')
+    # PETER: 0.1, 1, 1
+    # Andreu 1a suggerència: 0.5, 0.2, 1
 
     # Aquest deien ells que era important, en algun moment o altre he de provar si realment sense això fa més overfitting
     parser.add_argument('--clip', type=float, default=1.0, help='gradient clipping')

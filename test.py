@@ -43,7 +43,7 @@ def test(dataloader:DataLoader, model, loss_fn, device, save_results=False, data
             input_text = transposed_text[:-1]
             target_text = transposed_text[1:]
 
-            predicted = model(user, item, input_text)
+            predicted = model(user, item, rating, input_text, mode='parallel') #1234
             log_word_prob, log_context_dis, predicted_rating, _ = predicted
 
             loss_input = [log_word_prob, log_context_dis, predicted_rating]

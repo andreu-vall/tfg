@@ -182,10 +182,11 @@ class PositionalEncoding(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, emsize=512):
+    def __init__(self, emsize, internal_size):
         super(MLP, self).__init__()
-        self.linear1 = nn.Linear(emsize, emsize)
-        self.linear2 = nn.Linear(emsize, 1)
+        
+        self.linear1 = nn.Linear(2*emsize, internal_size) # in_features, out_features
+        self.linear2 = nn.Linear(internal_size, 1)
         self.sigmoid = nn.Sigmoid()
 
         self.init_weights()
@@ -197,9 +198,11 @@ class MLP(nn.Module):
         self.linear1.bias.data.zero_()
         self.linear2.bias.data.zero_()
 
-    def forward(self, hidden):  # (batch_size, emsize)
-        mlp_vector = self.sigmoid(self.linear1(hidden))  # (batch_size, emsize)
-        rating = torch.squeeze(self.linear2(mlp_vector))  # (batch_size,)
+    # simplement es concaten els vectors i es fa igual que abans
+    def forward(self, x1, x2):
+        x = torch.cat((x1, x2), 1) # dimensió 0 és la batch_size
+        mlp_vector = self.sigmoid(self.linear1(x))
+        rating = torch.squeeze(self.linear2(mlp_vector))
         return rating
 
 

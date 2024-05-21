@@ -322,6 +322,20 @@ def get_RMSE_MAE(results, max_rating, min_rating):
 
     RMSE = root_mean_square_error(real_predicted_rating, max_rating, min_rating)
     MAE = mean_absolute_error(real_predicted_rating, max_rating, min_rating).item() # si no torna un tensor
+    #1234 comentat ara lo del tensor pq ara em peta
 
     return RMSE, MAE
     
+
+from torch.utils.data import DataLoader, Subset
+
+def get_batch_for_test_purposes(data_path='data/amz-beauty-review', split_id='split_id_1', tokenizer='tokenizer-bert-base-uncased',
+                                context_window=10, batch_size=128):
+    
+    data = MyDataset(data_path, tokenizer, context_window)
+    split = MySplitDataset(data_path, len(data), split_id, load_split=True)
+    train_data = Subset(data, split.train)
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
+    first_batch = next(iter(train_dataloader))
+    return first_batch, data
+

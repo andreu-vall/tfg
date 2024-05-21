@@ -23,7 +23,6 @@ class PETER(nn.Module):
         super(PETER, self).__init__()
         self.pos_encoder = PositionalEncoding(emsize, dropout)  # emsize: word embedding size
 
-        self.context_window = context_window
 
         # ojo el dropout fa que sigui no deteministic?
 
@@ -48,7 +47,7 @@ class PETER(nn.Module):
         self.item_embeddings = nn.Embedding(nitem, emsize)
         self.token_embeddings = nn.Embedding(ntoken, emsize)
         self.hidden2token = nn.Linear(emsize, ntoken)
-        self.recommender = MLP(emsize)
+        self.recommender = MLP(emsize, emsize) # old: MLP(emsize)
 
         # quina diferència hi ha amb ui_len???
         # src_len, s'usa per: crear màscara atenció (de src_len + tgt_len), en el predict_seq per saber a partir de on es descodificaran tokens
@@ -61,11 +60,18 @@ class PETER(nn.Module):
         self.pad_idx = pad_idx
         self.emsize = emsize
 
-        self.attn_mask = PETER.generate_andreu_mask(2, 2, context_window)
+        # Ara amb això puc teòricament modificar-ho com vulgui. Puc canviar el input i/o el output
+        # self.attn_mask = PETER.generate_andreu_mask(2, 2, context_window) # aquest funciona
+        # PETER: generate_peter_mask(2 + context_window)
 
-        #self.attn_mask = PETER.generate_peter_mask(2 + context_window) # el +1 és pq ells tenien els paràmetres mal?
-
-        print('self.attn_mask shape is', self.attn_mask.shape) # [7, 7] (2 + 5)
+        # modificació 1: considerar el rating com a input enlloc de output
+        # AIXÒ SEMPRE EM FA UNA MÀSCARA QUADRADA
+        self.input_only_size = 2 + 1 # user, item + rating
+        self.output_only_size = 2 - 1 # rating, context - rating
+        self.context_window = context_window # text[:-1] and text[1:]
+        
+        self.falsos_hidden = 2
+        self.attn_mask = PETER.generate_andreu_mask(self.input_only_size, self.input_only_size, self.context_window)
 
         self.init_weights() # Aquí és on es podria inicialitzar els embeddings de tokens pre-entrenats
 
@@ -75,6 +81,12 @@ class PETER(nn.Module):
         mask = torch.tril(torch.ones(size, size)) # LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOL
         mask = mask == 0 # triu enlloc de tril m'ha fet perdre més de 2 hores inútilment!!!!
         return mask # maleït copilot!!!
+    
+    @staticmethod
+    def generate_peter_mask(size):
+        mask = PETER.generate_causal_mask(size)
+        mask[0, 1] = False
+        return mask
 
     @staticmethod
     def generate_andreu_mask(input_only_size, output_only_size, context_window):
@@ -95,13 +107,6 @@ class PETER(nn.Module):
     # hidden[2:7]: tokens 2-6 (5) N'HI HA 1 EXTRA?
     # hidden[7] WTF is it?
     
-    # @staticmethod
-    # def generate_peter_mask(size):
-    #     mask = PETER.generate_causal_mask(size)
-    #     mask[0, 1] = False # allow the first hidden position to attend both user and item for rating prediction
-    #     # significa que la hidden position 0 NO és bloquejat de llegir el input de la posició 1,
-    #     # per tant això vol dir que per la predicció de rating pot usar tant user com item
-    #     return mask
 
 
     def init_weights(self):
@@ -113,19 +118,19 @@ class PETER(nn.Module):
         self.hidden2token.bias.data.zero_()
 
     def predict_context(self, hidden):
-        context_prob = self.hidden2token(hidden[1])  # (batch_size, ntoken)
+        context_prob = self.hidden2token(hidden[self.falsos_hidden])  # (batch_size, ntoken)
         log_context_dis = func.log_softmax(context_prob, dim=-1)
         return log_context_dis
 
-    def predict_rating(self, hidden):
-        rating = self.recommender(hidden[0])  # (batch_size,)
-        return rating
+    # def predict_rating(self, hidden):
+    #     rating = self.recommender(hidden[0])  # (batch_size,)
+    #     return rating
 
     # en realitat aquesta funció és pràcticament el mateix. La única diferència és que en la 2a no importa tota la
     # resta i només vols el que et dona la última hidden, la qual he vist que era de mida variable
     def predict_seq(self, hidden):
         #print('predict_seq, right now hidden has shape', hidden.shape) # [6, 128, 512]
-        word_prob = self.hidden2token(hidden[2:])
+        word_prob = self.hidden2token(hidden[self.falsos_hidden+1:])
         #print('word_prob shape is', word_prob.shape) # [4, 128, 8631]
         log_word_prob = func.log_softmax(word_prob, dim=-1)
         return log_word_prob
@@ -161,12 +166,74 @@ class PETER(nn.Module):
 
     # Per tant el step 1 serà deixar de predir rating i context i predir directament el text
 
-    def forward(self, user, item, text, seq_prediction=True, context_prediction=True, rating_prediction=True):
+    def forward(self, user, item, rating, text, mode):
+        device = user.device
+        batch_size = user.size(0)
+        text_size = text.size(0)
+
+        user_embed = self.user_embeddings(user)
+        item_embed = self.item_embeddings(item)
+
+        # Sempre en qualsevol cas primer faré la predicció de rating 
+        # LOL donar tot 5's només és una loss de 1.9793450832366943
+        # i donant tot 5's dona 1.3801511526107788
+
+        # WTF amb 1 època ha augmentat el rating_loss???? Quin sentit té, es contraposa usar els embeddings
+        # en un lloc i un altre? Kinda estrany que vagi a pitjor, no?
+        predicted_rating = self.recommender(user_embed, item_embed)
+        #predicted_rating = torch.full((batch_size,), 4, dtype=torch.float32).to(device)
+
+        # La diferència és només que en mode parallel posaré de input del transformer el rating real
+        transformer_rating = rating if mode=='parallel' else predicted_rating
+
+        value = self.falsos_hidden + 1 + text_size
+
+        attn_mask = self.attn_mask[:value, :value].to(device)
+
+        r_src = transformer_rating.view(1, batch_size, -1).expand(-1, -1, 512).to(device) # suggerit by copilot (expand it, repeat gasta memòria)
+        w_src = self.token_embeddings(text)
+        
+        u_src = user_embed.unsqueeze(0)
+        i_src = item_embed.unsqueeze(0)
+
+        src = torch.cat([u_src, i_src, r_src, w_src], 0)
+        src = src * math.sqrt(self.emsize)
+        src = self.pos_encoder(src)
+
+        # ara el falta la key_padding_mask, yikes. De moment no la poso
+        # Ara segurament ja seria hora de fer-ho!
+
+        left = torch.zeros(batch_size, 2).bool().to(device)
+        right = text.t() == self.pad_idx
+        key_padding_mask = torch.cat([left, right], 1)
+
+        # lo important era el: value = self.falsos_hidden (2) + 1 + text_size
+        # simplement és marcar en quines posicions hi ha padding pq no influeixin en el càlcul del transformer
+
+
+        hidden, attns = self.transformer_encoder(src, attn_mask)
+
+        log_context_dis = self.predict_context(hidden)
+
+        if mode=='parallel':
+            log_word_prob = self.predict_seq(hidden)
+        elif mode=='sequential':
+            log_word_prob = self.generate_token(hidden)
+        else:
+            raise ValueError('mode should be either parallel or sequential')
+        
+        return log_word_prob, log_context_dis, predicted_rating, attns
+
+        
+
+    def forward2(self, user, item, text, seq_prediction=True, context_prediction=True, rating_prediction=True):
 
         device = user.device
         batch_size = user.size(0)
         
         total_len = 2 + text.size(0)
+
+        # ara he de triar la màscara diferent
 
         attn_mask = self.attn_mask[:total_len, :total_len].to(device)  # (total_len, total_len)
 
