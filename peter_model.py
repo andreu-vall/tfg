@@ -61,18 +61,28 @@ class PETER(nn.Module):
         self.pad_idx = pad_idx
         self.emsize = emsize
 
-        self.attn_mask = PETER.generate_peter_mask(2 + context_window) # el +1 és pq ells tenien els paràmetres mal?
+        self.attn_mask = PETER.generate_andreu_mask(2, 2, context_window)
+
+        #self.attn_mask = PETER.generate_peter_mask(2 + context_window) # el +1 és pq ells tenien els paràmetres mal?
 
         print('self.attn_mask shape is', self.attn_mask.shape) # [7, 7] (2 + 5)
 
         self.init_weights() # Aquí és on es podria inicialitzar els embeddings de tokens pre-entrenats
-    
+
 
     @staticmethod
     def generate_causal_mask(size):
         mask = torch.tril(torch.ones(size, size)) # LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOL
         mask = mask == 0 # triu enlloc de tril m'ha fet perdre més de 2 hores inútilment!!!!
         return mask # maleït copilot!!!
+
+    @staticmethod
+    def generate_andreu_mask(input_only_size, output_only_size, context_window):
+        mask = torch.full((input_only_size + context_window, output_only_size + context_window), True) # block everything
+        mask[:, :input_only_size] = False # input part is always visible
+        causal_mask = PETER.generate_causal_mask(context_window) # usual causal mask, context_window x context_window
+        mask[input_only_size:, output_only_size:] = causal_mask
+        return mask
 
 
     # input size: 8
@@ -85,11 +95,13 @@ class PETER(nn.Module):
     # hidden[2:7]: tokens 2-6 (5) N'HI HA 1 EXTRA?
     # hidden[7] WTF is it?
     
-    @staticmethod
-    def generate_peter_mask(size):
-        mask = PETER.generate_causal_mask(size)
-        mask[0, 1] = False # allow the first hidden position to attend both user and item for rating prediction
-        return mask
+    # @staticmethod
+    # def generate_peter_mask(size):
+    #     mask = PETER.generate_causal_mask(size)
+    #     mask[0, 1] = False # allow the first hidden position to attend both user and item for rating prediction
+    #     # significa que la hidden position 0 NO és bloquejat de llegir el input de la posició 1,
+    #     # per tant això vol dir que per la predicció de rating pot usar tant user com item
+    #     return mask
 
 
     def init_weights(self):
@@ -128,36 +140,41 @@ class PETER(nn.Module):
         return log_word_prob
 
 
+    # PETER
+    # input: user, item, text (minus last token) [1 + 1 + context_window - 1]
+    # output: rating, context, text (shifted right, minus first token) [1 + 1 + context_window - 1]
+    # user s'alinea amb rating, item amb context i per això la màscara és quadrada
+    # Per tant [context_window + 1, context_window + 1] de attn_mask
+
+    # Step intermig: borrar la predicció del context (la hidden que la prediu, per tant modificant 1 dimensió del output).
+    # Perquè quedi tot ben alineat potser tb hauria de borrar user, item?
+
+    # Andreu
+    # Per tant hi ha 2 extres que només tenen sentit en el input: user i item
+
+    # input: user, item, rating, context, text (minus last token) [1 + 1 + 1 + context_window + 1 - 1]
+    # output: rating, context, text (shifted right, minus first token) [1 + 1 + context_window + 1 - 1]
+    # Per taint [context_window + 3, context_window + 1] de attn_mask
+
+    # Podria treure 1 de input i un de output i tenir la màscara de mida 1, 1 menys per exemple primer de tot?
+    # O 
+
+    # Per tant el step 1 serà deixar de predir rating i context i predir directament el text
+
     def forward(self, user, item, text, seq_prediction=True, context_prediction=True, rating_prediction=True):
 
         device = user.device
         batch_size = user.size(0)
+        
+        total_len = 2 + text.size(0)
 
-        # print('self.context_window is', self.context_window) # 5
-        # print('text.size(0) is', text.size(0)) # 4 ara
-
-        # text.size(0) mira quants tokens tens de l'input ja generats
-        # per tant total_len és la suma de les coses pots mirar en qualsevol punt (perquè més endvant no tindria sentit mirar si no tens)
-        total_len = 2 + text.size(0)  # deal with generation when total_len != src_len + tgt_len
-        # see nn.MultiheadAttention for attn_mask and key_padding_mask
-
-        # Vull no calcular mai el context primer de tot
-        # This is why the attention mask is a square matrix of size 8x8
-
-        # But it could be of any shape not necessarily square
-
-
-
-        # print('attention mask shape is', self.attn_mask.shape) # [8, 8]
-        # print('total_len is', total_len) # 8
-
-        # La màscara d'atenció és per dir-li a totes les coses que hi ha generades fins ara, a quines pot atendre en cada punt
         attn_mask = self.attn_mask[:total_len, :total_len].to(device)  # (total_len, total_len)
 
-        # crec que la key_padding_mask bàscicament serviex per dir-li que no es fixi en els paddings per fer cap càlcul?
-        left = torch.zeros(batch_size, 2).bool().to(device)  # (batch_size, ui_len)
-        right = text.t() == self.pad_idx  # replace pad_idx with True and others with False, (batch_size, total_len - ui_len)
-        key_padding_mask = torch.cat([left, right], 1)  # (batch_size, total_len)
+        left = torch.zeros(batch_size, 2).bool().to(device)
+        right = text.t() == self.pad_idx
+        key_padding_mask = torch.cat([left, right], 1)
+
+
 
         # src és molt senzill, és posar-li lo de la posició i canviar els ID's per els embeddings,
         # on al principi són coses aleatòries però es van entrenant junt amb el model per intentar
@@ -171,19 +188,20 @@ class PETER(nn.Module):
         src = src * math.sqrt(self.emsize)
         src = self.pos_encoder(src)
 
-        # src: user (1) + item (1) + 
+        # attn_mask, 1=block the attention
+        # key_padding_mask, 1=block the attention, due to padding reasons
 
-        # print('src shape is', src.shape) # [6, 128, 512]
-        # print('attn_mask shape is', attn_mask.shape) # [6, 6]
-        # print('key_padding_mask shape is', key_padding_mask.shape) # [128, 6]
+        # Documentació de transformer_encoder:
+        # src: the sequence to the encoder (required).
+        # mask: the mask for the src sequence (optional).
+        # src_key_padding_mask: the mask for the src keys per batch (optional).
 
-        # Depenent de la màscara d'atenció, el hidden serà més o menys llarg
+        # en la traducció o sumarització evidentment pots mirar a tot arreu de l'input
+        # però en la tasca de generació de text només pots mirar a les paraules anteriors,
+        # perquè quan generis nou text només tindràs les posicions anteriors
+
         hidden, attns = self.transformer_encoder(src, attn_mask, key_padding_mask)
 
-        # generate first token: model(user, item, text, False) (és el seq_prediction)
-        # generate an additional token: model(user, item, text, False, False, False) seq_predction, context_prediction, rating_prediction
-
-        # per mi no acaba de tenir sentit tot això
 
         if rating_prediction:
             rating = self.predict_rating(hidden)  # (batch_size,)
