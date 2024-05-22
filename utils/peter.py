@@ -36,30 +36,6 @@ def bleu_score(references, generated, n_gram=4, smooth=False):
     return bleu_s * 100
 
 
-# def two_seq_same(sa, sb):
-#     if len(sa) != len(sb):
-#         return False
-#     for (wa, wb) in zip(sa, sb):
-#         if wa != wb:
-#             return False
-#     return True
-
-
-# # LOL L'HAN FET O(N^2) so ugly
-# def unique_sentence_percent(sequence_batch):
-#     unique_seq = []
-#     for seq in sequence_batch:
-#         count = 0
-#         for uni_seq in unique_seq:
-#             if two_seq_same(seq, uni_seq):
-#                 count += 1
-#                 break
-#         if count == 0:
-#             unique_seq.append(seq)
-
-#     return len(unique_seq) / len(sequence_batch), len(unique_seq)
-
-
 def mean_absolute_error(predicted, max_r, min_r, mae=True):
     total = 0
     for (r, p) in predicted:
@@ -101,7 +77,7 @@ def now_time():
 #     printed_loss = t_loss
 #     if rating_reg != 0: # what even is rating_reg?
 #         printed_loss += r_loss
-#     # Crec que aquí explota i no pinta res l'exponencial???
+#     # Crec que aquí explota i no pinta res l'exponencial??? Actually sí pq he aplicat logaritmes a algun lloc
 #     return f"{now_time()}{content(c_loss, t_loss, r_loss)} | valid loss {printed_loss:4.4f} on validation"
 
 

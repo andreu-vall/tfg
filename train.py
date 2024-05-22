@@ -132,6 +132,8 @@ def parse_arguments():
     parser.add_argument('split_id', type=str, help='load indexes')
     parser.add_argument('train_id', type=str, help='model id')
 
+    parser.add_argument('recommender_type', choices=['PETER', 'andreu'])
+
     parser.add_argument('--max_epochs', type=int, default=50, help='upper epoch limit')
     parser.add_argument('--batch_size', type=int, default=128, help='batch size')
     parser.add_argument('--initial_lr', type=float, default=1.0, help='initial learning rate') # Si learning_rate >= 1, matemàticament
@@ -232,7 +234,7 @@ if __name__ == "__main__":
     nitem = len(data.item_dict)
 
     mymodel = PETER(args.max_tokens, nuser, nitem, ntokens, args.emsize, args.nhead, args.nhid,
-                    args.nlayers, args.dropout, data.token_dict.pad).to(mydevice)
+                    args.nlayers, args.dropout, data.token_dict.pad, args.recommender_type).to(mydevice)
 
     ###############################################################################
     # Training code
