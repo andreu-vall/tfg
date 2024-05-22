@@ -47,3 +47,10 @@ train.py context_window=20
 - This could also be done in a user item, where it's feeded for example the kind of topics that the reviews has made till now
 
 But right now I'll have to focus on what I have, explain it and formalize the maths involved in all my pipeline
+
+
+```
+python train.py data/amz-beauty-review tokenizer-bert-base-uncased 10 split_id_1 train_id_good7 --max_epochs 30
+python test.py train_id_good7
+python generate.py train_id_good7 result_id_1
+```
