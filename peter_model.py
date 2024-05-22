@@ -65,6 +65,10 @@ class PETER(nn.Module):
 
     # És una attention_mask. Això vol dir que en els llocs on posis True, es bloquejarà l'atenció, per tant no es consderarà
     # Per tant els False significa que són les posicions que sí que es tinran en compte
+    # rows: input, cols: ouput
+
+    # True en mask[i, j] -> significa que el output token a la posició j NO pot veure el input token a la posició i
+    # False en mask[i, j] -> significa que el output token a la posició j SÍ pot veure el input token a la posició i
     @staticmethod
     def generate_causal_mask(size):
         mask = torch.tril(torch.ones(size, size)) # LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOL

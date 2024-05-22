@@ -219,6 +219,11 @@ class MySplitDataset:
             self.create_split(seed, data_length)
             assert not os.path.exists(self.split_dir)
             os.makedirs(self.split_dir)
+
+            # Per si necessito la seed amb la qual s'ha creat més tard
+            with open(f"{self.split_dir}/seed.txt", 'w') as f:
+                f.write(f"Seed: {seed}")
+
             self.save_split()
     
     def load_split(self):

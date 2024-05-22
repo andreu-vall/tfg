@@ -1,11 +1,14 @@
 __pycache__
-data
 out
-
 old
 pendent
-descartat
 
+# Show used seeds for data for reproducibility
+data/**/*.index
+data/**/tokenized-text
+data/**/reviews.csv
+
+# Show raw data sources
 raw_data/McAuley14/amz-beauty
 raw_data/McAuley14/amz-clothing
 raw_data/McAuley14/amz-sports
