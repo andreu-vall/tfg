@@ -2,6 +2,7 @@ __pycache__
 out
 old
 pendent
+solved but useful
 
 # Show used seeds for data for reproducibility
 data/**/*.index

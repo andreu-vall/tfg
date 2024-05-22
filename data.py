@@ -4,7 +4,7 @@ import math
 import torch
 import pandas as pd
 import heapq
-from torch.utils.data import Dataset, random_split
+from torch.utils.data import Dataset, random_split, DataLoader, Subset
 import sys
 import logging
 
@@ -98,6 +98,8 @@ class TokenDict(EntityDict):
         # self.cut -> significa que s'ha tallat la frase pq era massa llarga, per diferenciar-ho del <eos> normal
 
     def add_sentence(self, tokens):
+        self.add_entity(self.special_tokens[0]) # per si li passo els weights al text_criterion
+        self.add_entity(self.special_tokens[1] if len(tokens) <= self.max_tokens else self.special_tokens[4])
         for token in tokens[:self.max_tokens]:
             self.add_entity(token)
     
@@ -266,7 +268,7 @@ def record_execution(path):
 
 
 
-def decode_batch_results(user, item, rating, text, predicted_rating, predicted_context, predicted_text, data : MyDataset):
+def decode_batch_results(user, item, rating, text, predicted_rating, predicted_context, predicted_text, data:MyDataset):
 
     batch_size = user.size(0)
 
@@ -311,21 +313,22 @@ def get_RMSE_MAE(results, max_rating, min_rating):
     real_predicted_rating = [(r, p) for (r, p) in zip(real_ratings, predicted_ratings)]
 
     RMSE = root_mean_square_error(real_predicted_rating, max_rating, min_rating)
-    MAE = mean_absolute_error(real_predicted_rating, max_rating, min_rating).item()
-    # si es comenta la predicció de rating, aleshores no serà un tensor i la MAE petarà
+    MAE = mean_absolute_error(real_predicted_rating, max_rating, min_rating)
+    if torch.is_tensor(MAE): # a vegades és tensor i a vegades no
+        MAE = MAE.item()
 
     return RMSE, MAE
     
 
-# from torch.utils.data import DataLoader, Subset
 
-# def get_batch_for_test_purposes(data_path='data/amz-beauty-review', split_id='split_id_1',
-#                                 tokenizer='tokenizer-bert-base-uncased', max_tokens=10, batch_size=128):
+
+def get_batch_for_test_purposes(data_path='data/amz-beauty-review', split_id='split_id_1',
+                                tokenizer='tokenizer-bert-base-uncased', max_tokens=10, batch_size=128):
     
-#     data = MyDataset(data_path, tokenizer, max_tokens)
-#     split = MySplitDataset(data_path, len(data), split_id, load_split=True)
-#     train_data = Subset(data, split.train)
-#     train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
-#     first_batch = next(iter(train_dataloader))
-#     return first_batch, data
+    data = MyDataset(data_path, tokenizer, max_tokens)
+    split = MySplitDataset(data_path, len(data), split_id, load_split=True)
+    train_data = Subset(data, split.train)
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
+    first_batch = next(iter(train_dataloader))
+    return first_batch, data
 

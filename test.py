@@ -137,7 +137,15 @@ if __name__ == "__main__":
     
     ntokens = len(mydata.token_dict)
 
+    # Amb freqüències, amb poques èpoques va pitjor pq no aprèn ni a dir coses populars
+    # frequencies = torch.tensor(list(mydata.token_dict.entity_count.values()), dtype=torch.float, device=mydevice)
+    # weights = 1 / frequencies
+    # weights /= weights.sum()
+    # text_criterion = nn.NLLLoss(weight=weights, ignore_index=mydata.token_dict.pad)
+
     text_criterion = nn.NLLLoss(ignore_index=mydata.token_dict.pad)
+    # text_criterion = nn.CrossEntropyLoss(ignore_index=mydata.token_dict.pad)  # ignore the padding when computing loss
+
     rating_criterion = nn.MSELoss()
 
     myloss_fn = lambda loss_input, loss_output: peter_loss(

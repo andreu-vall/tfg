@@ -72,6 +72,7 @@ def train(model, loss_fn, optimizer, train_dataloader, val_dataloader, max_epoch
     metrics = [] # metrics serà en cada posició un diccionari
 
     val_losses = test(val_dataloader, model, loss_fn, device)
+    best_val_loss = val_losses['loss']
     metrics.append({
         "epoch": 0,
         "valid": val_losses
@@ -106,7 +107,6 @@ def train(model, loss_fn, optimizer, train_dataloader, val_dataloader, max_epoch
         previous_val_loss = metrics[-2]['valid']['loss']
         new_val_loss = metrics[-1]['valid']['loss']
 
-        # WTF pq no ha entrat aquí? Si clarament empitjorava
         # si no millora més que el threshold, en particular si empitjora:
         improvement = (previous_val_loss - new_val_loss) / previous_val_loss # positiu si es redueix, negatiu si empitjora
         if improvement < lr_improv_threshold:
@@ -114,8 +114,9 @@ def train(model, loss_fn, optimizer, train_dataloader, val_dataloader, max_epoch
             if optimizer.param_groups[0]['lr'] < min_lr:
                 break
         
-        # qualsevol millora en el valid_loss la guardo a disc, pq a partir d'aquí potser empitjora
-        if improvement > 0:
+        # només guardo el millor model
+        if new_val_loss < best_val_loss:
+            best_val_loss = new_val_loss
             with open(model_path, 'wb') as f:
                 torch.save(model, f)
     
@@ -237,7 +238,43 @@ if __name__ == "__main__":
     # Training code
     ###############################################################################
 
-    text_criterion = nn.NLLLoss(ignore_index=data.token_dict.pad)  # ignore the padding when computing loss
+    # Crec que aquest text_criterion és simplement una funció que s'aprèn per classificar en N classes,
+    # és bastant possible que estigui esbiaixada cap als tokens més comuns, potser somehow es podria
+    # intentar que no ho estigués tant? Li puc passar un weight paràmetre
+
+    # Espera un input que sigui log-probabilities of each class, que segons la documentació oficial de
+    # pytorch pots conseguir de manera fàcil amb el log_softmax a la last layer de la network.
+    # Crec que el intended use és més aviat per un problema de classificació de N classes (on N és petit),
+    # i inclús en aquest cas ja m'avisa que possiblement aprendrà més a fer les més populars.
+    # Important ingorar el index de padding, perquè és simplement per fer que les frases tinguin la mateixa
+    # length, i en general no has d'aprendre mai a posar padding, simplement es posa si en algun cas hi ha un <eos>.
+
+    # La loss function no té cap paràmetre a entrenar, simplement és una mesura overall de si estàs encertant o no
+    # les paraules que exactament volies predir. simplement agafen un input, output i retornen un valor
+    # puc provar amb lo dels weights aviam què
+
+    # Yikes a primer cop d'ull amb poques èpoques sembla que empitjora, pq ara no sap ni predir les coses
+    # populars, que era el que estava aconseguint el PETER
+
+    # Si fos una classificació en poques classes (com el rating per exemple si no ho fes coninu),
+    # aleshores segurament lo dels pesos sí que seria útil. Però en el meu cas no serveix aplicar-li
+    # weights així, perquè dona molta importància a tokens que només apareixen 1 cop, i llavors doncs
+    # les frases generades no tenen cap mena de sentit
+
+    # Per tant millor que estigui biased cap a les reviews populars i ja està...
+    
+    # frequencies = torch.tensor(list(data.token_dict.entity_count.values()), dtype=torch.float, device=mydevice)
+    # weights = 1 / frequencies
+    # weights /= weights.sum()
+    # text_criterion = nn.NLLLoss(weight=weights, ignore_index=data.token_dict.pad)
+
+    # El de PETER, sense weights. Estarà esbiaixat cap als tokens més comuns, però almenys dona coses amb sentit
+    text_criterion = nn.NLLLoss(ignore_index=data.token_dict.pad)
+
+    # Cross Entropy, llavors cal eliminar el log_softmax de l'última capa de la xarxa
+    #text_criterion = nn.CrossEntropyLoss(ignore_index=data.token_dict.pad)
+
+
     rating_criterion = nn.MSELoss()
 
     myloss_fn = lambda loss_input, loss_output: peter_loss(

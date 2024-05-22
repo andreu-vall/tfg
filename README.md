@@ -50,7 +50,7 @@ But right now I'll have to focus on what I have, explain it and formalize the ma
 
 
 ```
-python train.py data/amz-beauty-review tokenizer-bert-base-uncased 10 split_id_1 train_id_good7 --max_epochs 30
+python train.py data/amz-beauty-review tokenizer-bert-base-uncased 10 split_id_1 train_id_next_3 --max_epochs 3
 python test.py train_id_good7
 python generate.py train_id_good7 result_id_1
 ```

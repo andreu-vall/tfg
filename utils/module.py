@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as func
 from typing import Tuple, Optional
 from torch import Tensor
+import numpy as np
+import matplotlib.pyplot as plt
 
 # Andreu: this is probably from https://pytorch.org/docs/stable/_modules/torch/nn/modules/transformer.html#TransformerEncoderLayer
 # If I want to see this code is useful having in utils. Otherwise I should just use directly the torch official library
@@ -179,14 +181,13 @@ class PositionalEncoding(nn.Module):
 
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
-
+    
 
 class MLP(nn.Module):
-    def __init__(self, emsize, internal_size):
+    def __init__(self, input_size, hidden_size):
         super(MLP, self).__init__()
-        
-        self.linear1 = nn.Linear(2*emsize, internal_size) # in_features, out_features
-        self.linear2 = nn.Linear(internal_size, 1)
+        self.linear1 = nn.Linear(input_size, hidden_size)
+        self.linear2 = nn.Linear(hidden_size, 1)
         self.sigmoid = nn.Sigmoid()
 
         self.init_weights()
@@ -198,38 +199,11 @@ class MLP(nn.Module):
         self.linear1.bias.data.zero_()
         self.linear2.bias.data.zero_()
 
-    # simplement es concaten els vectors i es fa igual que abans
-    def forward(self, x1, x2):
-        x = torch.cat((x1, x2), 1) # dimensió 0 és la batch_size
+    def forward(self, x): 
         mlp_vector = self.sigmoid(self.linear1(x))
         rating = torch.squeeze(self.linear2(mlp_vector))
         return rating
 
-
-# TOT són matrius quadrades de total_len x total_len
-
-# És al revés del que interpretaria jo, perquè normalment la màscara se fa servir per AMAGAR
-# coses que el teu model no vols que vegi. Per tant, posar un True a la màscara vol dir que 
-# vols amagar aquella cosa, i posar un False a la màscara vol dir que NO la vols amagar
-
-# Triangle de 1s a la part estrictament superior i 0s a la resta
-def generate_square_subsequent_mask(total_len):
-    mask = torch.tril(torch.ones(total_len, total_len))  # (total_len, total_len), lower triangle -> 1.; others 0.
-    mask = mask == 0  # lower -> False; others True
-    return mask
-
-
-# Exactament igual que l'anterior, amb l'única diferència que el 2n element de la 1a fila (0, 1) és False
-# en realitat només hi ha un paràmetre, src_len + tgt_len, que serà la mida de la matriu quadrada
-def generate_peter_mask(src_len, tgt_len):
-    total_len = src_len + tgt_len
-    mask = generate_square_subsequent_mask(total_len)
-    mask[0, 1] = False  # allow to attend for user and item
-    return mask
-
-
-import numpy as np
-import matplotlib.pyplot as plt
 
 # aquest és de l'Alejandro
 def plot_mask(mask):
