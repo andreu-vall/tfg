@@ -134,8 +134,6 @@ if __name__ == "__main__":
 
     test_data = Subset(mydata, mysplitdata.test)
     mytest_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
-    
-    ntokens = len(mydata.token_dict)
 
     # Amb freqüències, amb poques èpoques va pitjor pq no aprèn ni a dir coses populars
     # frequencies = torch.tensor(list(mydata.token_dict.entity_count.values()), dtype=torch.float, device=mydevice)
@@ -150,7 +148,7 @@ if __name__ == "__main__":
 
     myloss_fn = lambda loss_input, loss_output: peter_loss(
         loss_input, loss_output, text_criterion, rating_criterion,
-        args.context_reg, args.text_reg, args.rating_reg, ntokens
+        args.context_reg, args.text_reg, args.rating_reg
     )
     losses_dic, results, metrics = test(mytest_dataloader, mymodel, myloss_fn, mydevice, save_results=True, data=mydata)
     # test fent el save_results, en tokenizer-bert-base-uncased window_size=5: 42s (només cal tenir

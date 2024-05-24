@@ -134,6 +134,8 @@ def parse_arguments():
 
     parser.add_argument('recommender_type', choices=['PETER', 'andreu'])
 
+    parser.add_argument('--bert_embeddings', action='store_true', help='use bert embeddings')
+
     parser.add_argument('--max_epochs', type=int, default=50, help='upper epoch limit')
     parser.add_argument('--batch_size', type=int, default=128, help='batch size')
     parser.add_argument('--initial_lr', type=float, default=1.0, help='initial learning rate') # Si learning_rate >= 1, matemàticament
@@ -233,8 +235,8 @@ if __name__ == "__main__":
     nuser = len(data.user_dict)
     nitem = len(data.item_dict)
 
-    mymodel = PETER(args.max_tokens, nuser, nitem, ntokens, args.emsize, args.nhead, args.nhid,
-                    args.nlayers, args.dropout, data.token_dict.pad, args.recommender_type).to(mydevice)
+    mymodel = PETER(args.max_tokens, nuser, nitem, ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout,
+                    data.token_dict.pad, args.recommender_type, args.bert_embeddings, data.token_dict.idx_to_entity).to(mydevice)
 
     ###############################################################################
     # Training code
@@ -281,7 +283,7 @@ if __name__ == "__main__":
 
     myloss_fn = lambda loss_input, loss_output: peter_loss(
         loss_input, loss_output, text_criterion, rating_criterion,
-        args.context_reg, args.text_reg, args.rating_reg, ntokens
+        args.context_reg, args.text_reg, args.rating_reg
     )
 
     myoptimizer = torch.optim.SGD(mymodel.parameters(), lr=args.initial_lr) #, momentum=0.9) # de moment no li poso el momentum
