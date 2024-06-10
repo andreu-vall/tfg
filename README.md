@@ -1,6 +1,6 @@
 # PETER-Andreu
 
-Train a transformers model from scratch to learn to generate personalized justifications on why you might like or dislike some items.
+Train a transformers model from scratch to learn to generate personalized explanations on why you might like or dislike some items.
 
 ## Prerquisites
 ```
@@ -25,14 +25,10 @@ torch
 1. create_mcauley.ipynb (2014 Amazon Beauty Reviews)
 2. python split.py data/amz-beauty-review split_id_1 1
 3. python tokenizer.py data/amz-beauty-review tokenizer-bert-base-uncased (5 min)
-4. python train.py data/amz-beauty-review tokenizer-bert-base-uncased 15 split_id_1 train_id_1 --epochs 3 (each epoch takes around 2m 30s amb window=15)
+4. python train.py data/amz-beauty-review tokenizer-bert-base-uncased 15 split_id_1 train_id_1 --epochs 3 (each epoch takes around 2m 30s with window=15)
 5. python test.py train_id_1
 6. python generate.py train_id_1 greedy result_id_1 (1m 40s)
 ```
-
-data/amz-beauty-summary
-tokenizer.py tarda només 20 seg
-train.py context_window=20
 
 
 ## Sources
@@ -44,23 +40,3 @@ train.py context_window=20
 - To force the model to better alineate the predicted rating with the review content, an additional loss component could be added that penalized the inconsistency between the predicted_rating and the predicted_text
 - To better exploit the knowledge in the datasest, we could add a item_context that gave the most probable words that all users of the database have given to a certain item for example (but not the reviews from the valid or test set)
 - This could also be done in a user item, where it's feeded for example the kind of topics that the reviews has made till now
-
-But right now I'll have to focus on what I have, explain it and formalize the maths involved in all my pipeline
-
-
-```
-python train.py data/amz-beauty-review tokenizer-bert-base-uncased 10 split_id_1 train_id_next_3 --max_epochs 3
-python test.py train_id_good7
-python generate.py train_id_good7 result_id_1
-```
-
-
-## Args Usage
-1. create.ipynb [data_path]
-2. split.py [data_path] [split_id] [seed]
-3. tokenizer.py [data_path] [tokenizer]
-4. train.py [data_path] [tokenizer] [context_window] [split_id] [train_id] [--args]
-5. test.py [train_id]
-6. generate.py [train_id] [strategy] [result_id] [--args]
-7. analysis.ipynb [train_id] [result_id]
-8. 
