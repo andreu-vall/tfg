@@ -15,8 +15,8 @@ from utils.module import PositionalEncoding, TransformerEncoderLayer, Transforme
 
 class PETER(nn.Module):
     # Crec que aquí hi ha masses arguments? O potser els hauria de mirar tots?
-    def __init__(self, max_tokens, nuser, nitem, ntoken, emsize, nhead, nhid, nlayers, dropout, pad_idx, recommender_type,
-                 bert_embeddings, token_dict_idx_to_entity):
+    def __init__(self, max_tokens, nuser, nitem, ntoken, emsize, nhead, nhid, nlayers, dropout, pad_idx,
+                 recommender_source, recommender_usage, bert_embeddings, token_dict_idx_to_entity):
         
         super(PETER, self).__init__()
 
@@ -58,18 +58,23 @@ class PETER(nn.Module):
         # Possiblement li hauria de donar un nom més descriptiu del que és cadascun. La diferència és que el recomanador
         # de PETER, per la part de text, només és un regularitzador que modifica lleugerament els embeddings de user i item.
         
-
-        if recommender_type not in ['PETER', 'andreu']:
-            raise ValueError(f"Recommender type {recommender_type} not recognized. Must be 'PETER' or 'andreu'")
-        self.recommender_type = recommender_type
-
-        if self.recommender_type == 'PETER':
-            self.recommender = MLP(emsize, emsize)
+        assert recommender_source in ['transformer', 'user_item_embeddings']
+        self.recommender_source = recommender_source
+        if self.recommender_source=='transformer':
+            self.recommender = MLP(emsize, emsize) # from hidden[0]
+        else:
+            self.recommender = MLP(2*emsize, emsize) # with user, item embeddings
+        
+        assert recommender_usage in ['regularizer', 'transformer_input']
+        self.recommender_usage = recommender_usage
+        if self.recommender_usage=='regularizer':
             self.always_visible_input = 2 # user, item (en el PETER li deien src_len)
         else:
-            self.recommender = MLP(2*emsize, emsize) # li passaré directament user i item embedding
-            self.always_visible_input = 2 + 1 # user, item + rating (el PETER només l'augmentava amb les features)
+            self.always_visible_input = 2 + 1 # user, item + rating
+            self.rating_embeddings = nn.Embedding(6, emsize) # 5 ratings from 1 to 5. 1 extra cause it indexes from 0
+            # and not to have to do the -1 in the forward method
         
+
         # text[:-1] and text[1:] size. Meaning +2 of <bos>, <eos> and -1 of the shift right for fully causal
         self.context_window = max_tokens + 1
         print(f'max_tokens is {max_tokens}, so context_window is {self.context_window}')
@@ -136,33 +141,100 @@ class PETER(nn.Module):
 
         user_embed = self.user_embeddings(user)
         item_embed = self.item_embeddings(item)
+        text_embed = self.token_embeddings(text)
 
+        # si no faig servir com a transformer_input, com ho puc fer??
 
-        if self.recommender_type == 'andreu':
+        # Ara falla una altra cosa, en el test de valid (en paral·lel)
 
-            x = torch.cat((user_embed, item_embed), 1) # uso directament els embeddings de user i item per predir el rating
-            predicted_rating = self.recommender(x)
-            
-            if mode=='parallel': # En model paral·lel pel transformer s'usa el rating real
-                assert rating is not None
-                transformer_rating = rating
-            else:
-                transformer_rating = predicted_rating
+        # Ara entrenant amb transformer_input i user_item_embeddings sembla que no peta?
 
-            # Tinc certs dubtes sobre si fer això és més útil que només utilitzar el rating com un tasca per modificar els embeddings
-            normalized_rating = (transformer_rating - 1) / 4 # rating by users is in [1, 5], predicted could be outside this
-            rating_src = normalized_rating.view(1, batch_size, -1).expand(-1, -1, self.emsize) # l'he afegit jo de input, els de PETER
-            # només els servia el rating per modificar lleugerament els embedding de user, item i ja està
-
-
-        user_src = user_embed.unsqueeze(0)
-        item_src = item_embed.unsqueeze(0)
-        text_src = self.token_embeddings(text)
-
-        if self.recommender_type=='andreu': # li poso el rating com a input del transformers també
-            src = torch.cat([user_src, item_src, rating_src, text_src], 0)
+        if self.recommender_usage=='regularizer': # Com PETER
+            src = torch.cat([user_embed.unsqueeze(0), item_embed.unsqueeze(0), text_embed], 0)
         else:
-            src = torch.cat([user_src, item_src, text_src], 0)
+            if mode=='parallel' or mode=='sequential' and rating is not None:
+                assert rating is not None
+                if self.recommender_source=='user_item_embeddings':
+                    predicted_rating = self.recommender(torch.cat((user_embed, item_embed), 1))
+                else:
+                    assert False, 'no hauria de passsar això?'
+                    # ha passat amb --recommender_usage transformer_input i l'altre per defecte (transformer)
+                    # No es pot fer anar amb recommender_usage transformer_input i recommender_source transformer
+                
+                used_rating = rating # podria ser integer o float (si són les seves pròpies prediccions)
+            
+            else: # mode sequential and rating is None: cal predir el rating primer. I ja el puc usar directament
+                assert not self.recommender_source == 'transformer', 'això no es pot'
+                x = torch.cat((user_embed, item_embed), 1)
+                predicted_rating = used_rating = self.recommender(x) # alhora es prediu i ja s'usa
+
+            if torch.is_floating_point(used_rating):
+                used_rating = used_rating.round().clamp(min=1, max=5).long()  # cal convertir-lo a lo mateix del model
+
+            rating_embed = self.rating_embeddings(used_rating)
+            src = torch.cat([user_embed.unsqueeze(0), item_embed.unsqueeze(0), rating_embed.unsqueeze(0), text_embed], 0)
+
+        
+        # Lo típic del transformers
+        src = src * math.sqrt(self.emsize)
+        src = self.pos_encoder(src)
+
+        # Crec que és pq en el test no he filtrat el vocabulari com en el train
+
+        my_size = self.always_visible_input + text_size # mida que ara mateix tinc disponible a mirar
+        attn_mask = self.attn_mask[:my_size, :my_size].to(device)
+
+        key_padding_mask = torch.full((batch_size, my_size), False, dtype=torch.bool, device=device)
+        key_padding_mask[:, self.always_visible_input:] = text.t() == self.pad_idx
+        hidden, attns = self.transformer_encoder(src, attn_mask, key_padding_mask)
+
+        # Només es pot calcular al final un cop s'ha fet el transformer en aquest cas
+        if self.recommender_source=='transformer':
+            predicted_rating = self.recommender(hidden[0])
+        elif mode=='parallel': # funciona simplement així? com a mínim ara no peta
+            predicted_rating = self.recommender(torch.cat((user_embed, item_embed), 1))
+
+        # Cal veure si realment la tasca de predicció de context és útil o no
+        # Si no es realment molt útil preferia borrar-la, o com a mínim donar-li menys pes.
+        # Pel que estic veient ara l'únic que serveix és per predir les paraules més comunes...
+        # Si s'utilitza tant sols així la veritat és que sembla molt poc útil. Si realment vulgúes
+        # que fos útil hauria de predir les paraules clau més important de la review.
+        # Més aviat està predint només stop words...
+        log_context_dis = self.get_log_prob(hidden[1])
+
+        if mode=='parallel':
+            used_hidden = hidden[self.always_visible_input:] # es descodifiquen tots els tokens de text
+        else:
+            used_hidden = hidden[-1] # només cal descodificar l'últim token de text
+        
+        log_token_prob = self.get_log_prob(used_hidden)
+
+
+        # yikes predicted_rating not defined
+        # s'ha executat el test en paral·lel
+
+        # Encara que estigui en el paral·lel s'hauria de calcular el predicted_rating
+
+        # Per després: en el mode 
+
+        
+        return log_token_prob, log_context_dis, predicted_rating, attns
+    
+
+
+
+
+    def forward2(self, user, item, rating, text, mode):
+
+        device = user.device
+        batch_size = user.size(0)
+        text_size = text.size(0)
+
+        user_src = self.user_embeddings(user).unsqueeze(0)  # compute user embeddings
+        item_src = self.item_embeddings(item).unsqueeze(0)  # compute item embeddings
+        text_src = self.token_embeddings(text)              # compute text embeddings
+
+        src = torch.cat([user_src, item_src, text_src], 0) 
 
         src = src * math.sqrt(self.emsize)
         src = self.pos_encoder(src)
@@ -173,18 +245,10 @@ class PETER(nn.Module):
         key_padding_mask = torch.full((batch_size, my_size), False, dtype=torch.bool, device=device)
         key_padding_mask[:, self.always_visible_input:] = text.t() == self.pad_idx
         hidden, attns = self.transformer_encoder(src, attn_mask, key_padding_mask)
+        
+        predicted_rating = self.recommender(hidden[0])
 
-
-        # Cal veure si realment la tasca de predicció de context és útil o no
-        # Si no es realment molt útil preferia borrar-la, o com a mínim donar-li menys pes.
-        # Pel que estic veient ara l'únic que serveix és per predir les paraules més comunes...
-        # Si s'utilitza tant sols així la veritat és que sembla molt poc útil. Si realment vulgúes
-        # que fos útil hauria de predir les paraules clau més important de la review.
-        # Més aviat està predint només stop words...
         log_context_dis = self.get_log_prob(hidden[1])
-
-        if self.recommender_type=='PETER':
-            predicted_rating = self.recommender(hidden[0])
 
         if mode=='parallel':
             used_hidden = hidden[self.always_visible_input:] # es descodifiquen tots els tokens de text

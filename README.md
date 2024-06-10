@@ -17,7 +17,7 @@ torch
 6. **generate.py [train_id] [strategy] [result_id] [--args]**: decode test from text with a certain decoding strategy
 7. **analysis.ipynb [train_id] [result_id]**: human analysis of the results genereated by a model using a strategy
 
-\* Step 3 will be automatically done by train.py if not done beforehand. It's only done once, because tokenizing is kinda slow and might take around 5 minutes
+\* Step 3 will be automatically done by train.py if not done beforehand. It's only done once, because bert tokenizing is kinda slow and might take around 5 minutes
 
 
 ## Example usage
@@ -26,7 +26,6 @@ torch
 2. python split.py data/amz-beauty-review split_id_1 1
 3. python tokenizer.py data/amz-beauty-review tokenizer-bert-base-uncased (5 min)
 4. python train.py data/amz-beauty-review tokenizer-bert-base-uncased 15 split_id_1 train_id_1 --epochs 3 (each epoch takes around 2m 30s amb window=15)
-4. python train.py data/amz-beauty-review tokenizer-bert-base-uncased 5 split_id_1 train_id_14
 5. python test.py train_id_1
 6. python generate.py train_id_1 greedy result_id_1 (1m 40s)
 ```
@@ -54,3 +53,14 @@ python train.py data/amz-beauty-review tokenizer-bert-base-uncased 10 split_id_1
 python test.py train_id_good7
 python generate.py train_id_good7 result_id_1
 ```
+
+
+## Args Usage
+1. create.ipynb [data_path]
+2. split.py [data_path] [split_id] [seed]
+3. tokenizer.py [data_path] [tokenizer]
+4. train.py [data_path] [tokenizer] [context_window] [split_id] [train_id] [--args]
+5. test.py [train_id]
+6. generate.py [train_id] [strategy] [result_id] [--args]
+7. analysis.ipynb [train_id] [result_id]
+8. 

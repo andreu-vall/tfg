@@ -126,13 +126,14 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('data_path', type=str, help='path for loading the pickle data')
-    parser.add_argument('tokenizer', choices=['tokenizer-bert-base-uncased'], help='tokenizer to use')
+    parser.add_argument('tokenizer', choices=['tokenizer-bert-base-uncased', 'tokenizer-space'], help='tokenizer to use')
     parser.add_argument('max_tokens', type=int, help='real tokens without counting <bos> and <eos>')
     #parser.add_argument('context_window', type=int) # és molt important
     parser.add_argument('split_id', type=str, help='load indexes')
     parser.add_argument('train_id', type=str, help='model id')
 
-    parser.add_argument('recommender_type', choices=['PETER', 'andreu'])
+    parser.add_argument('--recommender_source', default='transformer', choices=['transformer', 'user_item_embeddings'])
+    parser.add_argument('--recommender_usage', default='regularizer', choices=['regularizer', 'transformer_input'])
 
     parser.add_argument('--bert_embeddings', action='store_true', help='use bert embeddings')
 
@@ -145,6 +146,7 @@ def parse_arguments():
     # AVIAM PROVO DE REDUIR-HO MOLT MÉS PQ ES COMENCI ABANS A REDUIR EL LEARN RATE
     # CREC QUE ENCARA EL PUC AUGMENTAR BASTANT MÉS, O ALTERNATIVAMENT COMPARAR TANT EL IMPROVEMENT EN TRAIN COM VALID
     # PER VEURE SI ESTÀ OVERFITTING
+    # Crec que és massa alt ara mateix. Per exemple en l'època 3 ha millorat un 3.5%
     parser.add_argument('--lr_improv_threshold', type=float, default=0.05, help='minimum improvement to keep the learning rate') # 0.01?
     # si no es redueix la loss en un 2.5% redueixo a la meitat el learning_rate. Crec que estaria bé tmb veure
     # el del tranining, però sembla que no és gaire comú
@@ -157,9 +159,10 @@ def parse_arguments():
     # també podria provar amb el momentum, que el exemple oficial de torch l'utilitzaven i potser sigui millor així
 
     # Aquestes tres crec que també són molt importants per definir a què li dona importància el teu model quan aprèn
-    parser.add_argument('--rating_reg', type=float, default=0.5, help='regularization on recommendation task')
-    parser.add_argument('--context_reg', type=float, default=0.2, help='regularization on context prediction task')
+    parser.add_argument('--rating_reg', type=float, default=0.1, help='regularization on recommendation task')
+    parser.add_argument('--context_reg', type=float, default=1, help='regularization on context prediction task')
     parser.add_argument('--text_reg', type=float, default=1, help='regularization on text generation task')
+    parser.add_argument('--vocab_size', type=int, help='vocabulary size for text generation')
     # PETER: 0.1, 1, 1
     # Andreu 1a suggerència: 0.5, 0.2, 1
 
@@ -184,7 +187,13 @@ def parse_arguments():
     # reduir-te el dataset o agafar un millor tokenitzador
     # parser.add_argument('--text_vocab_size', type=int, help='number of tokens to keep in the text vocabulary')
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.recommender_source == 'transformer' and args.recommender_usage == 'transformer_input':
+        raise ValueError("The combination of 'transformer' and 'transformer_input' is not allowed. "
+                         "No té sentit usar el rating com input del transformer i després predint el rating usant el transformer")
+
+    return args
 
 
 
@@ -213,7 +222,7 @@ if __name__ == "__main__":
     # puc posar my als que es passen com variables per assegurar que no siguin globals
     # la resta no cal. i un cop vegi que no es passen globals ja no caldria tampoc els my
 
-    data = MyDataset(args.data_path, args.tokenizer, args.max_tokens)
+    data = MyDataset(args.data_path, args.tokenizer, args.max_tokens, args.vocab_size)
 
     split_data = MySplitDataset(args.data_path, len(data), args.split_id, True)
 
@@ -236,7 +245,8 @@ if __name__ == "__main__":
     nitem = len(data.item_dict)
 
     mymodel = PETER(args.max_tokens, nuser, nitem, ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout,
-                    data.token_dict.pad, args.recommender_type, args.bert_embeddings, data.token_dict.idx_to_entity).to(mydevice)
+                    data.token_dict.pad, args.recommender_source, args.recommender_usage, args.bert_embeddings,
+                    data.token_dict.idx_to_entity).to(mydevice)
 
     ###############################################################################
     # Training code

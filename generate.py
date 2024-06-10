@@ -52,12 +52,16 @@ def generate_batch(model:nn.Module, bos_idx, max_length, top_k_sample, num_beams
 
         # posat el rating com a None? Potser l'hauria de calcular la primera vegada i després passar-li
         # el propi rating que he calculat en la primera iteració?
+        #
+        # Ah clar, em falta passar-li
 
         if step == 0:
+            # yikes amb un mode ara peta aquí
             log_word_prob, log_context_dis, rating, _ = model(user, item, None, text, 'sequential')
             context = get_topk_tokens(log_context_dis, topk=max_length)
         else:
-            log_word_prob, _, _, _ = model(user, item, None, text, 'sequential')
+            # li he posat el rating ara
+            log_word_prob, _, _, _ = model(user, item, rating, text, 'sequential')
 
 
 
@@ -206,7 +210,7 @@ if __name__ == "__main__":
     with open(model_path, 'rb') as f:
         mymodel = torch.load(f).to(mydevice)
 
-    mydata = MyDataset(args.data_path, args.tokenizer, args.max_tokens)
+    mydata = MyDataset(args.data_path, args.tokenizer, args.max_tokens, args.vocab_size)
     mysplitdata = MySplitDataset(args.data_path, len(mydata), args.split_id, True)
 
     test_data = Subset(mydata, mysplitdata.test)

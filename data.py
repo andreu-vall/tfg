@@ -150,7 +150,7 @@ class TokenDict(EntityDict):
 # user, item, rating, text
 class MyDataset(Dataset):
 
-    def __init__(self, data_path, tokenizer, max_tokens):
+    def __init__(self, data_path, tokenizer, max_tokens, vocab_size=None):
 
         self.max_tokens = max_tokens # sense comptar el <bos> i <eos>
 
@@ -159,8 +159,10 @@ class MyDataset(Dataset):
 
         # 2, load the train/valid/test split doesn't need to be done here. It will be done when batching
 
+        # Ara necessito un space tokenizer només
+
         # 3, tokenize the text with a tokenizer
-        original_data["tokenized_text"], self.tokenize, self.untokenize = load(data_path, tokenizer)
+        original_data["tokenized_text"], self.tokenize, self.untokenize = load(data_path, tokenizer, False)
 
         # 4, transform users, items and text to ID's
 
@@ -176,6 +178,10 @@ class MyDataset(Dataset):
         # here the optative vocab size would be applied. Però crec que MAI no m'interessa limitar el vocabulari de res
         # en tot cas el que cal és un tokenitzador millor, o passar-li menys dades al model si no tens prou recursos
         print(f"There's {len(self.user_dict)} users, {len(self.item_dict)} items and {len(self.token_dict)} tokens")
+
+        if vocab_size is not None:
+            self.token_dict.keep_most_frequent(vocab_size)
+            print(f"Reduced to {len(self.token_dict)} tokens")
 
         self.user_encode = lambda x: self.user_dict.entity_to_idx.get(x)
         self.item_encode = lambda x: self.item_dict.entity_to_idx.get(x)

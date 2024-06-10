@@ -129,7 +129,7 @@ if __name__ == "__main__":
     with open(model_path, 'rb') as f:
         mymodel = torch.load(f).to(mydevice)
 
-    mydata = MyDataset(args.data_path, args.tokenizer, args.max_tokens)
+    mydata = MyDataset(args.data_path, args.tokenizer, args.max_tokens, args.vocab_size)
     mysplitdata = MySplitDataset(args.data_path, len(mydata), args.split_id, load_split=True)
 
     test_data = Subset(mydata, mysplitdata.test)
